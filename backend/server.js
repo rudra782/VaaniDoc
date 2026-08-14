@@ -162,25 +162,20 @@ function mapIntakeSession(session) {
           session,
         );
 
-  const smartQuestions = session.smartQuestions ??
-    session.smart_questions ??
-    session.data?.smart_questions ?? [
-      "When did this start?",
-      "Have you had similar symptoms in the past?",
-      "Does anything make it better or worse?",
-    ];
-  const treatmentDraft =
-    session.treatmentDraft ??
-    session.treatment_draft ??
-    session.data?.treatment_draft ??
-    "Ensure adequate rest and hydration. Seek medical advice if symptoms persist.";
-  const patientFriendlySummary =
-    session.patientFriendlySummary ??
-    session.patient_friendly_summary ??
-    session.data?.patient_friendly_summary ??
-    (language.startsWith("Hindi")
-      ? "कृपया आराम करें और पर्याप्त पानी पीएं। लक्षण बने रहने पर डॉक्टर से मिलें।"
-      : "Please rest and drink plenty of fluids. Consult a doctor if symptoms worsen.");
+        const smartQuestions =
+        session.smartQuestions ??
+        session.smart_questions ??
+        session.data?.smart_questions;
+      
+      const treatmentDraft =
+        session.treatmentDraft ??
+        session.treatment_draft ??
+        session.data?.treatment_draft;
+      
+      const patientFriendlySummary =
+        session.patientFriendlySummary ??
+        session.patient_friendly_summary ??
+        session.data?.patient_friendly_summary;
 
   const data = {
     language,

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import API_URL from '../config';
 
 interface TestCase {
   id: number;
@@ -102,7 +103,7 @@ export const ValidationDashboard: React.FC = () => {
   useEffect(() => {
     const loadTestCases = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/validation/test-cases');
+        const response = await fetch(`${API_URL}/api/validation/test-cases`);
         if (response.ok) {
           const data = await response.json();
           setTestCases(data);
@@ -136,7 +137,7 @@ export const ValidationDashboard: React.FC = () => {
       const startTime = Date.now();
 
       try {
-        const response = await fetch('http://localhost:5000/api/analyze', {
+        const response = await fetch(`${API_URL}/api/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

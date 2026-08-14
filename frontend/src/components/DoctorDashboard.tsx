@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
+import API_URL from '../config';
 
 interface IntakeSession {
   sessionId: string;
@@ -50,9 +51,12 @@ interface DoctorDashboardProps {
   initialSessions: IntakeSession[];
   onSessionCleared: (sessionId: string) => void;
   lowBandwidthMode: boolean;
+  sessionsLoading: boolean;
+  sessionsError: string | null;
+  onRetrySessions: () => void;
 }
 
-export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSessions, onSessionCleared, lowBandwidthMode }) => {
+export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSessions, onSessionCleared, lowBandwidthMode, sessionsLoading, sessionsError, onRetrySessions }) => {
   const [sessions, setSessions] = useState<IntakeSession[]>(() => initialSessions.map(normalizeSession));
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -80,7 +84,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
 
   // Connect to Socket.io for live updates
   useEffect(() => {
-    const socket: Socket = io('http://localhost:5000');
+    const socket: Socket = io(API_URL);
 
     socket.on('connect', () => {
       setIsConnected(true);
@@ -146,7 +150,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
 
   const handleDismissPatient = async (sessionId: string) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/session/${sessionId}/end`, {
+      const response = await fetch(`${API_URL}/api/session/${sessionId}/end`, {
         method: 'POST'
       });
 
@@ -272,7 +276,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
           <div><strong>{offlineCount}</strong><span>Local rule intakes</span></div>
         </div>
       </section>
-      <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '1.5rem' }}>
+      <div className="dashboard-grid">
       
       {/* Real-time sync notification banner */}
       {newSessionNotification && (
@@ -283,7 +287,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
       )}
 
       {/* Sidebar: Patient Queue */}
-      <div className="patient-queue" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', height: 'fit-content' }}>
+      <aside className="patient-queue">
         <div className="queue-header" style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fafbfb' }}>
           <span style={{ fontWeight: 800, fontSize: '0.9rem', textTransform: 'uppercase', color: 'var(--text-main)' }}>Patient Triage Queue</span>
           <span className="badge">{filteredSessions.length} Active</span>
@@ -330,8 +334,15 @@ ${selectedSession.treatmentDraft || 'N/A'}
           </div>
         </div>
 
-        <div className="queue-list" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-          {filteredSessions.length === 0 ? (
+        <div className="queue-list">
+          {sessionsLoading && sessions.length === 0 ? (
+            <div className="dashboard-state" role="status"><span className="state-spinner" aria-hidden="true" /><strong>Loading intake queue…</strong></div>
+          ) : sessionsError && sessions.length === 0 ? (
+            <div className="dashboard-state dashboard-state-error" role="alert">
+              <strong>Queue unavailable</strong><span>{sessionsError}</span>
+              <button className="btn" onClick={onRetrySessions}>Try again</button>
+            </div>
+          ) : filteredSessions.length === 0 ? (
             <div className="empty-state" style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
               <p style={{ margin: 0, fontSize: '0.85rem' }}>No matching patient intakes.</p>
             </div>
@@ -379,10 +390,10 @@ ${selectedSession.treatmentDraft || 'N/A'}
             {isConnected ? 'LIVE WS FEED' : 'RECONNECTING...'}
           </span>
         </div>
-      </div>
+      </aside>
 
       {/* Main Panel: EHR Clinical Intake Record */}
-      <div className="patient-details-view" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <section className="patient-details-view">
         {selectedSession ? (
           <>
             {/* Pulsating danger overlay for emergency patients */}
@@ -403,14 +414,14 @@ ${selectedSession.treatmentDraft || 'N/A'}
               </div>
             )}
 
-            <div className="details-header" style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', backgroundColor: '#fafbfb' }}>
+            <div className="details-header">
               <div className="details-title">
                 <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>{selectedSession.patientName || 'Anonymous'}</h2>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
                   Consult ID: <strong style={{ color: 'var(--text-main)', fontFamily: 'var(--font-mono)' }}>{selectedSession.sessionId}</strong> &bull; Age: {selectedSession.age || 'N/A'} &bull; Gender: {selectedSession.gender} &bull; Native Dialect: {selectedSession.languageSpoken}
                 </p>
               </div>
-              <div className="details-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+              <div className="details-actions">
                 <button className="btn" style={{ width: 'auto', padding: '0.45rem 0.85rem', fontSize: '0.8rem', fontWeight: 700 }} onClick={handleCopyNote}>
                   📋 Copy EHR Note
                 </button>
@@ -423,131 +434,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
               </div>
             </div>
 
-            <div className="details-body" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              <div className="clinical-report" style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1.5rem', backgroundColor: '#ffffff' }}>
-                
-                {/* EHR Header Row */}
-                <div className="clinical-header-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.25rem', marginBottom: '1.25rem' }}>
-                  <div className="clinical-header-cell">
-                    <strong style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Triage Priority</strong>
-                    <span className={`clinical-urgency-banner urgency-${selectedSession.urgencyClassification}`} style={{ display: 'inline-block', fontWeight: 800, padding: '0.15rem 0.5rem', fontSize: '0.75rem', borderRadius: '4px' }}>
-                      {selectedSession.urgencyClassification}
-                    </span>
-                  </div>
-                  
-                  <div className="clinical-header-cell">
-                    <strong style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Suggested Specialist</strong>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                      {selectedSession.suggestedSpecialist}
-                    </span>
-                  </div>
-
-                  <div className="clinical-header-cell">
-                    <strong style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Symptom Severity</strong>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                      {selectedSession.severity}
-                    </span>
-                  </div>
-
-                  <div className="clinical-header-cell">
-                    <strong style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>LLM Extraction Confidence</strong>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary)' }}>
-                      {selectedSession.isOfflineGenerated ? 'N/A (Local Rules)' : (selectedConfidence !== null ? `${selectedConfidence}%` : 'Calculating...')}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Chief Complaint */}
-                <div className="clinical-section-block" style={{ marginBottom: '1.25rem' }}>
-                  <h4 className="clinical-section-title" style={{ margin: '0 0 0.35rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>Chief Complaint</h4>
-                  <p className="clinical-section-content" style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)' }}>
-                    {selectedSession.chiefComplaint}
-                  </p>
-                </div>
-
-                {/* Clinical Summary */}
-                <div className="clinical-section-block" style={{ marginBottom: '1.25rem' }}>
-                  <h4 className="clinical-section-title" style={{ margin: '0 0 0.35rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>History of Present Illness / Summary</h4>
-                  <p className="clinical-section-content" style={{ margin: 0, fontSize: '0.9rem', lineHeight: '1.6', color: 'var(--text-body)' }}>
-                    {selectedSession.clinicalSummary}
-                  </p>
-                </div>
-
-                {/* Duration */}
-                <div className="clinical-section-block" style={{ marginBottom: '1.25rem' }}>
-                  <h4 className="clinical-section-title" style={{ margin: '0 0 0.35rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>Duration of Symptoms</h4>
-                  <p className="clinical-section-content" style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-body)', fontWeight: 600 }}>
-                    {selectedSession.duration || 'Not specified'}
-                  </p>
-                </div>
-
-                {/* Urgency justification */}
-                <div className="clinical-section-block" style={{ marginBottom: '1.25rem' }}>
-                  <h4 className="clinical-section-title" style={{ margin: '0 0 0.35rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>Triage Justification (Why this urgency?)</h4>
-                  <p className="clinical-section-content" style={{ margin: 0, fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                    {selectedSession.urgencyReason}
-                  </p>
-                </div>
-
-                {/* Categories & Associated symptoms */}
-                <div className="clinical-section-block" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.25rem' }}>
-                  <div>
-                    <h4 className="clinical-section-title" style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>Symptom Categories</h4>
-                    <div className="badge-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                      {selectedSession.symptomCategories && selectedSession.symptomCategories.length > 0 ? (
-                        selectedSession.symptomCategories.map((cat, idx) => (
-                          <span key={idx} className="clinical-badge" style={{ backgroundColor: 'var(--primary-light)', color: 'var(--primary)', border: '1px solid rgba(13,148,136,0.15)', padding: '0.15rem 0.45rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>
-                            {cat}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="clinical-badge">Unclassified</span>
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <h4 className="clinical-section-title" style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>Associated Symptoms</h4>
-                    <div className="badge-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                      {selectedSession.associatedSymptoms && selectedSession.associatedSymptoms.length > 0 ? (
-                        selectedSession.associatedSymptoms.map((sym, idx) => (
-                          <span key={idx} className="clinical-badge" style={{ backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '0.15rem 0.45rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>
-                            {sym}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="clinical-badge" style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>None extracted</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Side by side Translation validation check */}
-                <div className="clinical-section-block" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1.25rem', backgroundColor: '#f8fafc', padding: '1rem', borderRadius: '8px' }}>
-                  <h4 className="clinical-section-title" style={{ margin: '0 0 0.75rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
-                    Patient Input & Translation Check
-                  </h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
-                    <div>
-                      <span style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem', textTransform: 'uppercase' }}>
-                        Patient Input ({selectedSession.languageSpoken})
-                      </span>
-                      <p style={{ margin: 0, fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-body)', lineHeight: '1.5' }}>
-                        "{selectedSession.originalSymptomsText}"
-                      </p>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem', textTransform: 'uppercase' }}>
-                        Organized English Translation
-                      </span>
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-body)', lineHeight: '1.5' }}>
-                        {selectedSession.translatedSymptomsText}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-
+            <div className="details-body">
               {/* Clinical decision-support workspace */}
               <section className="copilot-workspace" aria-labelledby="copilot-workspace-title">
                 <div className="copilot-workspace-heading">
@@ -875,7 +762,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
             </div>
           </div>
         )}
-      </div>
+      </section>
 
       {/* Sharing and QR Code Modal (Wow Factor) */}
       {showQRModal && selectedSession && (

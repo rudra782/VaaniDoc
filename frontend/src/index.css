@@ -467,9 +467,12 @@ body {
 /* EHR Doctor Dashboard Layout */
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 290px 1fr;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  align-items: start;
   gap: 1.5rem;
-  height: calc(100vh - 120px);
+  width: 100%;
+  height: auto;
+  min-height: 0;
 }
 
 @media (max-width: 900px) {
@@ -485,7 +488,11 @@ body {
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  height: 100%;
+  width: 100%;
+  height: auto;
+  max-height: calc(100vh - 2rem);
+  position: sticky;
+  top: 1rem;
   overflow: hidden;
   box-shadow: var(--shadow-sm);
 }
@@ -504,7 +511,9 @@ body {
 }
 
 .queue-list {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(500px, calc(100vh - 230px));
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -570,8 +579,11 @@ body {
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  height: 100%;
-  overflow: hidden;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
   box-shadow: var(--shadow-sm);
 }
 
@@ -580,7 +592,9 @@ body {
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 1rem;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   background-color: #fafbfb;
 }
 
@@ -598,18 +612,25 @@ body {
   font-size: 0.775rem;
   color: var(--primary);
   margin: 0.25rem 0 0 0;
+  overflow-wrap: anywhere;
 }
 
 .details-actions {
   display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.5rem;
 }
 
 .details-body {
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow: visible;
   padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
 /* Structured Clinical Chart styling */
@@ -617,45 +638,16 @@ body {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background-color: #ffffff;
-  overflow: hidden;
+  width: 100%;
+  height: auto;
+  flex: 0 0 auto;
+  overflow: visible;
   box-shadow: var(--shadow-sm);
 }
 
-.clinical-header-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  border-bottom: 1px solid var(--border-color);
-  background-color: #fafbfb;
-  font-size: 0.825rem;
-}
-
 @media (max-width: 1100px) {
-  .clinical-header-row {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-.clinical-header-cell {
-  padding: 1rem 1.25rem;
-  border-right: 1px solid var(--border-color);
-}
-
-.clinical-header-cell:last-child {
-  border-right: none;
-}
-
-.clinical-header-cell strong {
-  display: block;
-  font-family: var(--font-title);
-  font-size: 0.675rem;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  letter-spacing: 0.5px;
-  margin-bottom: 0.25rem;
-}
-
-.clinical-header-cell span {
-  font-weight: 700;
+  .details-header { flex-direction: column; }
+  .details-actions { width: 100%; justify-content: flex-start; }
 }
 
 .clinical-section-block {
@@ -683,6 +675,22 @@ body {
   color: var(--text-main);
   line-height: 1.6;
 }
+
+.dashboard-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .45rem;
+  padding: 2rem 1rem;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: .78rem;
+}
+
+.dashboard-state strong { color: var(--text-main); font-size: .84rem; }
+.dashboard-state .btn { width: auto; margin-top: .35rem; padding: .45rem .75rem; font-size: .75rem; }
+.dashboard-state-error { color: #a34840; }
+.state-spinner { width: 1.1rem; height: 1.1rem; border: 2px solid #cde7e2; border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
 
 /* Soothing Urgency Badges */
 .clinical-urgency-banner {
@@ -1007,8 +1015,6 @@ body {
   .details-header { padding: 1rem !important; flex-direction: column; gap: 1rem; }
   .details-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
   .details-actions .btn:last-child { grid-column: span 2; }
-  .clinical-header-row { grid-template-columns: 1fr 1fr !important; }
-  .clinical-header-cell { padding: 0.75rem !important; }
 }
 
 /* Back Button for light clinical theme */
@@ -1187,9 +1193,6 @@ body {
     border: 1px solid #000000 !important;
     padding: 0 !important;
   }
-  .clinical-header-row {
-    border-bottom: 2px solid #000000 !important;
-  }
 }
 
 /* Glowing queue border and pulse transitions */
@@ -1329,7 +1332,7 @@ body {
 .overview-metrics span { font-size: .65rem; font-weight: 700; color: rgba(255,255,255,.68); }
 .overview-metrics .metric-urgent strong { color: #ffd1cb; }
 
-.dashboard-grid { height: min(680px, calc(100vh - 270px)) !important; min-height: 510px; }
+.dashboard-grid { height: auto !important; min-height: 0; }
 .patient-queue, .patient-details-view { border: 1px solid #dbe7e4 !important; box-shadow: 0 12px 28px rgba(15, 61, 58, .06) !important; }
 .queue-header { background: #fbfefd !important; padding: 1rem 1.1rem !important; }
 .queue-filters { background: #f7fbfa !important; padding: .85rem !important; }
@@ -1340,15 +1343,12 @@ body {
 .details-header { background: #fbfefd !important; padding: 1.25rem 1.45rem !important; }
 .details-body { background: #f6faf9; padding: 1.25rem !important; }
 .clinical-report { border: 1px solid #dce8e5 !important; box-shadow: none !important; }
-.clinical-header-row { background: #f6fbfa !important; }
-.clinical-header-cell { padding: .9rem 1rem !important; }
 .clinical-section-block { padding: 1rem 1.15rem !important; }
 .details-actions .btn { width: auto !important; background: white; }
 .details-actions .btn-danger { background: #fff4f3; }
 .offline-banner { box-shadow: 0 4px 14px rgba(15, 61, 58, .08); }
 
 .patient-container .clinical-card { border-color: #d6e8e4 !important; background: rgba(255,255,255,.96); }
-.patient-container .presets-container { background: linear-gradient(135deg, #effcf8, #f7fdfa) !important; border-color: #cdece4 !important; }
 .patient-container .voice-section { background: linear-gradient(145deg, #f6fcfb, #ecfaf6) !important; border-color: #cfe8e2 !important; }
 .patient-container .segmented-control { background: #eef6f4 !important; padding: .22rem !important; }
 .patient-container .segment-btn { border-radius: 6px; }
@@ -1358,8 +1358,9 @@ body {
   .overview-metrics { width: 100%; }
   .overview-metrics div { flex: 1; }
   .dashboard-grid { height: auto !important; min-height: 0; }
-  .patient-queue { max-height: 420px; }
-  .patient-details-view { min-height: 600px; }
+  .patient-queue { position: static; max-height: none; }
+  .queue-list { max-height: 360px; }
+  .patient-details-view { min-height: 0; }
 }
 
 @media (max-width: 560px) {
