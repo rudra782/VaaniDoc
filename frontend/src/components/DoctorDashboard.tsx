@@ -95,15 +95,26 @@ const conciseText = (value: string, limit = 180) => value.length > limit ? `${va
 const missingInformationLabel = (value: string) => {
   const rules: Array<[RegExp, string]> = [
     [/symptom onset and duration/i, 'Onset / Duration'],
+    [/symptom severity and effect on normal activities/i, 'Severity / Impact'],
     [/exact location.*triggers.*relieving factors/i, 'Location / Triggers'],
     [/associated symptoms.*warning signs/i, 'Associated symptoms'],
     [/pregnancy status/i, 'Pregnancy status'],
     [/medication and other allergies/i, 'Allergies'],
     [/current medications.*interactions/i, 'Medications'],
     [/relevant chronic diseases/i, 'Medical history'],
-    [/kidney or liver disease history/i, 'Kidney / liver history'],
+    [/kidney or liver disease history/i, 'Kidney / Liver history'],
   ];
   return rules.find(([pattern]) => pattern.test(value))?.[1] || conciseText(value, 32);
+};
+
+const formatConsultationStarted = (timestamp: string | undefined) => {
+  if (!timestamp) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  }).format(date);
 };
 
 const normalizeSession = (session: IntakeSession): IntakeSession => {
@@ -303,6 +314,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
   };
 
   const selectedSession = sessions.find(s => s.sessionId === selectedSessionId);
+  const consultationStarted = formatConsultationStarted(selectedSession?.timestamp);
   const cleanClinicalSummary = selectedSession ? clinicianFacingSummary(selectedSession.clinicalSummary, selectedSession.originalSymptomsText) : '';
   const savedDraft = selectedSession ? consultationDrafts[selectedSession.sessionId] : undefined;
   const draftAnswer = (question: string) => savedDraft?.answers[question] ?? selectedSession?.consultationAnswers?.find(item => item.question === question)?.answer ?? '';
@@ -566,7 +578,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
                 <span className="overview-stage-label">Stage 1 · Patient Overview</span>
                 <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>{selectedSession.patientName || 'Anonymous'}</h2>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                  Consult ID: <strong style={{ color: 'var(--text-main)', fontFamily: 'var(--font-mono)' }}>{selectedSession.sessionId}</strong> &bull; Age: {selectedSession.age || 'N/A'} &bull; Gender: {selectedSession.gender} &bull; Native Dialect: {selectedSession.languageSpoken}
+                  Consult ID: <strong style={{ color: 'var(--text-main)', fontFamily: 'var(--font-mono)' }}>{selectedSession.sessionId}</strong> &bull; Age: {selectedSession.age || 'N/A'} &bull; Gender: {selectedSession.gender} &bull; Native Dialect: {selectedSession.languageSpoken}{consultationStarted && <> &bull; Started: {consultationStarted}</>}
                 </p>
                 <div className="patient-overview-row" aria-label="Patient overview">
                   <span><small>Chief complaint</small><strong>{selectedSession.chiefComplaint}</strong></span>
@@ -633,7 +645,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
                         <div className="completeness-status"><div className="completeness-ring" style={{ '--completion': `${selectedSession.consultationCompleteness ?? 0}%` } as React.CSSProperties} aria-label={`Information completeness ${selectedSession.consultationCompleteness ?? 0}%`}><span>{selectedSession.consultationCompleteness ?? 0}%</span></div><div><span>Information Completeness</span><strong>{selectedSession.consultationCompleteness ?? 0}%</strong></div></div>
                         <div className="information-needed"><strong>Information Needed</strong><div className="missing-chip-list">{selectedSession.missingInformation?.length ? <>{selectedSession.missingInformation.slice(0, 5).map((item, index) => <span key={index}>{missingInformationLabel(item)}</span>)}{selectedSession.missingInformation.length > 5 && <details><summary>+ {selectedSession.missingInformation.length - 5} more</summary><div>{selectedSession.missingInformation.slice(5).map((item, index) => <span key={index}>{missingInformationLabel(item)}</span>)}</div></details>}</> : <span>No additional items</span>}</div></div>
                       </div>
-                      {!!selectedSession.smartQuestions?.length && <div className="guided-questions"><h4>AI Suggested Questions</h4><div className="question-list-panel">{selectedSession.smartQuestions.map((question, index) => <label key={index} className="question-row"><b>{index + 1}</b><span>{question}</span><input className="form-control" value={draftAnswer(question)} onChange={event => updateDraft({ answers: { ...(savedDraft?.answers || Object.fromEntries((selectedSession.consultationAnswers || []).map(item => [item.question, item.answer]))), [question]: event.target.value } })} placeholder="Type or record the patient’s answer" /></label>)}</div></div>}
+                      {!!selectedSession.smartQuestions?.length && <div className="guided-questions"><h4>AI Suggested Questions</h4><div className="question-list-panel">{selectedSession.smartQuestions.map((question, index) => <label key={index} className="question-row"><b>{index + 1}</b><span>{question}</span><input className="form-control" value={draftAnswer(question)} onChange={event => updateDraft({ answers: { ...(savedDraft?.answers || Object.fromEntries((selectedSession.consultationAnswers || []).map(item => [item.question, item.answer]))), [question]: event.target.value } })} placeholder="Type the patient’s answer..." /></label>)}</div></div>}
                       <details className="vitals-panel"><summary>Vitals &amp; Examination <span>Optional</span></summary><div className="vitals-grid">{[['temperature','Temperature'],['bpSystolic','BP systolic'],['bpDiastolic','BP diastolic'],['pulse','Pulse'],['spo2','SpO2'],['respiratoryRate','Respiratory rate'],['painScore','Pain score (0–10)']].map(([key,label]) => <label key={key}><span>{label}</span><input className="form-control" value={savedDraft?.vitals[key] ?? selectedSession.vitals?.[key] ?? ''} onChange={event => updateDraft({ vitals: { ...(savedDraft?.vitals || selectedSession.vitals || {}), [key]: event.target.value } })} /></label>)}</div><label><span>Focused Examination Notes</span><textarea className="form-control" value={savedDraft?.examinationNotes ?? selectedSession.examinationNotes ?? ''} onChange={event => updateDraft({ examinationNotes: event.target.value })} placeholder="Record observed examination findings only" /></label></details>
                       <div className="consultation-notes-actions"><label className="consultation-notes"><span>Additional Consultation Notes</span><textarea className="form-control" value={savedDraft?.clinicianNotes ?? selectedSession.clinicianNotes ?? ''} onChange={event => updateDraft({ clinicianNotes: event.target.value })} placeholder="Add any additional clinical notes, observations or important details" /></label>
                       <div className="consultation-actions"><button className="btn btn-primary" disabled={isReanalyzing} onClick={handleReanalyze}>{isReanalyzing ? 'Updating clinical assessment...' : 'Update Clinical Assessment'}</button></div></div>

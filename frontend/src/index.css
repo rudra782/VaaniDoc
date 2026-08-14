@@ -1450,7 +1450,7 @@ body {
 .information-needed > strong { color: #385954; font-size: .8rem; }
 .information-needed p { margin: .35rem 0 0; color: #6a817d; font-size: .82rem; }
 .missing-chip-list { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
-.missing-chip-list > span, .missing-chip-list details span { padding: .3rem .55rem; border: 1px solid #d7e7e3; border-radius: 999px; background: #fff; color: #42635e; font-size: .75rem; }
+.missing-chip-list > span, .missing-chip-list details span { max-width: 100%; padding: .3rem .55rem; border: 1px solid #d7e7e3; border-radius: 999px; background: #fff; color: #42635e; font-size: .75rem; line-height: 1.25; white-space: nowrap; }
 .missing-chip-list details summary { cursor: pointer; padding: .3rem .55rem; color: #176c63; font-size: .75rem; font-weight: 800; }
 .missing-chip-list details div { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .45rem; }
 .guided-questions { margin-top: 1.35rem; padding: 0; border: 0; background: transparent; }
