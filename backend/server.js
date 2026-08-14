@@ -10,6 +10,8 @@ import {
   analyzeSymptoms,
   calculateExtractionConfidence,
   resolveSuggestedSpecialist,
+  calculateConsultationCompleteness,
+  reanalyzeConsultation,
 } from "./geminiService.js";
 
 dotenv.config();
@@ -179,6 +181,9 @@ function mapIntakeSession(session) {
     medicationConsiderations: session.medicationConsiderations ?? session.data?.medication_considerations ?? [],
     medicationSafetySummary: session.medicationSafetySummary ?? session.data?.medication_safety_summary,
     followUpGuidance: session.followUpGuidance ?? session.data?.follow_up_guidance ?? [],
+    suggestedExamination: session.suggestedExamination ?? session.data?.suggested_examination ?? [],
+    possibleInvestigations: session.possibleInvestigations ?? session.data?.possible_investigations ?? [],
+    warningSignsToWatchFor: session.warningSignsToWatchFor ?? session.data?.warning_signs_to_watch_for ?? [],
   };
 
   const data = {
@@ -205,6 +210,9 @@ function mapIntakeSession(session) {
     medication_considerations: copilotFields.medicationConsiderations,
     medication_safety_summary: copilotFields.medicationSafetySummary,
     follow_up_guidance: copilotFields.followUpGuidance,
+    suggested_examination: copilotFields.suggestedExamination,
+    possible_investigations: copilotFields.possibleInvestigations,
+    warning_signs_to_watch_for: copilotFields.warningSignsToWatchFor,
   };
 
   return {
@@ -242,6 +250,15 @@ function mapIntakeSession(session) {
     urgencyReason,
     redFlags: red_flags,
     ...copilotFields,
+    consultationAnswers: Array.isArray(session.consultationAnswers) ? session.consultationAnswers : [],
+    clinicianNotes: session.clinicianNotes || "",
+    vitals: session.vitals && typeof session.vitals === "object" ? session.vitals : {},
+    examinationNotes: session.examinationNotes || "",
+    ...calculateConsultationCompleteness(session),
+    analysisVersion: Number(session.analysisVersion) || 1,
+    lastAnalyzedAt: session.lastAnalyzedAt || session.timestamp || new Date().toISOString(),
+    isConsultationFinalized: Boolean(session.isConsultationFinalized),
+    assessmentStage: session.assessmentStage || "Initial Assessment",
 
     success: true,
     data,
@@ -375,6 +392,31 @@ app.post("/api/analyze", async (req, res) => {
       .status(500)
       .json({ error: error.message || "Failed to analyze symptoms." });
   }
+});
+
+// Re-analyze the same volatile consultation. The previous successful session is
+// only replaced after analysis completes, so provider errors cannot blank it.
+app.post("/api/session/:id/reanalyze", async (req, res) => {
+  const current = activeSessions.get(req.params.id);
+  if (!current) return res.status(404).json({ error: "Session not found." });
+  try {
+    const updated = mapIntakeSession(await reanalyzeConsultation(current, req.body));
+    activeSessions.set(req.params.id, updated);
+    io.emit("sessions-update", Array.from(activeSessions.values()).filter(isRealPatientIntake).map(mapIntakeSession));
+    return res.status(200).json(updated);
+  } catch (error) {
+    console.error("Consultation re-analysis failed:", error);
+    return res.status(502).json({ error: "Clinical assessment could not be updated. The previous assessment was retained." });
+  }
+});
+
+app.post("/api/session/:id/finalize", (req, res) => {
+  const current = activeSessions.get(req.params.id);
+  if (!current) return res.status(404).json({ error: "Session not found." });
+  const updated = mapIntakeSession({ ...current, isConsultationFinalized: true, finalizedAt: new Date().toISOString() });
+  activeSessions.set(req.params.id, updated);
+  io.emit("sessions-update", Array.from(activeSessions.values()).filter(isRealPatientIntake).map(mapIntakeSession));
+  return res.status(200).json(updated);
 });
 
 // Endpoint to sync offline generated/cached intakes
