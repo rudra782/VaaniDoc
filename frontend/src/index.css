@@ -1407,7 +1407,6 @@ body {
 .offline-banner { box-shadow: 0 4px 14px rgba(15, 61, 58, .08); }
 
 .patient-container .clinical-card { border-color: #d6e8e4 !important; background: rgba(255,255,255,.96); }
-.patient-container .presets-container { background: linear-gradient(135deg, #effcf8, #f7fdfa) !important; border-color: #cdece4 !important; }
 .patient-container .voice-section { background: linear-gradient(145deg, #f6fcfb, #ecfaf6) !important; border-color: #cfe8e2 !important; }
 .patient-container .segmented-control { background: #eef6f4 !important; padding: .22rem !important; }
 .patient-container .segment-btn { border-radius: 6px; }
