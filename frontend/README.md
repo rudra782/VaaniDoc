@@ -13,7 +13,7 @@ Privacy-first multilingual clinical intake for rural and semi-urban clinics in I
 
 ## Run locally
 
-1. In `backend`, create `.env` with `GEMINI_API_KEY=...` (optional; the local rules fallback works without it), then run `npm start`.
+1. In `backend`, configure `AI_PROVIDER=gemini` and a server-side `GEMINI_API_KEY` for hosted analysis (or explicitly configure Ollama locally), then run `npm start`. Without a provider, the conservative generic extractor is used.
 2. In `frontend`, run `npm run dev`.
 3. Open the Vite URL. Use `/patient` for the patient terminal, `/doctor` for the clinician queue, and `/validation` for the quality dashboard.
 

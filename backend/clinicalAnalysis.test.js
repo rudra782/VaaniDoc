@@ -26,7 +26,28 @@ test("vague arbitrary inputs remain narration-grounded", () => {
     for (const symptom of forbidden) assert.doesNotMatch(asserted, new RegExp(symptom, "i"), `${narration} must not inject ${symptom}`);
     assert.equal(result.duration, "Not specified");
     assert.equal(result.severity, "Not specified");
+    assert.ok(result.possibleCauses.length > 0);
+    assert.equal(result.possibleCauses.every((cause) => cause.confidence === "low"), true);
+    assert.ok(result.missingInformation.length > 0);
+    assert.ok(result.recommendedNextSteps.length > 0);
+    assert.ok(result.selfCareGuidance.length > 0);
+    assert.ok(result.precautions.length > 0);
+    assert.deepEqual(result.medicationConsiderations, []);
+    assert.ok(result.followUpGuidance.length > 0);
   }
+});
+
+test("blood in vomit changes abdominal triage without inventing other findings", () => {
+  const vague = createConservativeFallback("stomach pain", "English", {});
+  const urgent = createConservativeFallback("severe stomach pain with blood in vomit", "English", {});
+  assert.equal(vague.urgencyClassification, "Low");
+  assert.deepEqual(vague.redFlags, []);
+  assert.equal(urgent.urgencyClassification, "Emergency");
+  assert.deepEqual(urgent.redFlags, ["Blood in vomit"]);
+  assert.doesNotMatch(JSON.stringify(urgent.associatedSymptoms), /fever|diarrhea|dehydration/i);
+  assert.match(urgent.recommendedNextSteps.join(" "), /immediate emergency/i);
+  assert.deepEqual(urgent.medicationConsiderations, []);
+  assert.notDeepEqual(vague.selfCareGuidance, urgent.selfCareGuidance);
 });
 
 test("explicit details are preserved and evidence escalates urgency", () => {
@@ -51,4 +72,15 @@ test("analysis uses the conservative fallback when no provider is configured", a
   assert.equal(second.associatedSymptoms.includes("Fever"), false);
   assert.notEqual(first.clinicalSummary, second.clinicalSummary);
   assert.notEqual(first.treatmentDraft + first.smartQuestions.join(), second.treatmentDraft + second.smartQuestions.join());
+});
+
+test("copilot guidance varies across broad complaint categories", () => {
+  const narrations = ["cough", "itching", "my knee hurts", "pain while urinating", "headache"];
+  const reports = narrations.map((text) => createConservativeFallback(text, "English", {}));
+  assert.equal(new Set(reports.map((item) => item.symptomCategories[0])).size, reports.length);
+  assert.equal(new Set(reports.map((item) => item.selfCareGuidance.join(" "))).size, reports.length);
+  for (const report of reports) {
+    assert.deepEqual(report.medicationConsiderations, []);
+    assert.match(report.possibleCauses[0].reasoning, /not contain enough evidence/i);
+  }
 });

@@ -1243,6 +1243,17 @@ body {
 .copilot-section-card { min-width: 0; padding: 1rem; border: 1px solid #dfeae7; border-radius: 10px; background: #fff; }
 .copilot-section-card h4, .handout-card h4 { margin: 0 0 .55rem; color: #173f3b; font: 800 .88rem var(--font-title); }
 .copilot-section-card p { margin: 0; color: #45615d; font-size: .83rem; line-height: 1.65; white-space: pre-wrap; }
+.copilot-section-card ul { margin: .35rem 0 0; padding-left: 1.15rem; color: #45615d; font-size: .82rem; line-height: 1.55; }
+.evidence-label { margin-top: .65rem !important; color: #0f766e !important; font-size: .68rem !important; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.cause-list { display: grid; gap: .55rem; }
+.cause-item { padding: .65rem; border: 1px solid #dfeae7; border-radius: 8px; background: #f8fcfb; }
+.cause-item > div { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.confidence-chip { padding: .12rem .45rem; border-radius: 999px; background: #e6f4f1; color: #17675f; font-size: .62rem; font-weight: 800; text-transform: uppercase; }
+.medication-card h4 span { margin-left: .4rem; color: #0f766e; font-size: .64rem; text-transform: uppercase; }
+.handout-section { margin-top: 1rem; padding-top: .8rem; border-top: 1px solid #dfeae7; }
+.handout-section h5 { margin: 0 0 .35rem; color: #20514b; font-size: .78rem; }
+.handout-section ul { margin: 0; padding-left: 1.15rem; color: #45615d; font-size: .8rem; line-height: 1.55; }
+.handout-warning { padding: .75rem; border: 1px solid #efc4bd; border-radius: 8px; background: #fff7f6; }
 .copilot-section-card .section-helper { margin-bottom: .7rem; color: #78908c; font-size: .73rem; }
 .treatment-card { background: #f4fbf9; border-color: #cce7e1; }
 .red-flags-card { background: #fff7f6; border-color: #f1c9c3; }
