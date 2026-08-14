@@ -182,113 +182,7 @@ function App() {
 
   // 1. Render Landing Homepage (Route: /)
   if (currentPath === '/' || currentPath === '/index.html' || currentPath.includes('/?')) {
-    return <LandingPage lowBandwidthMode={lowBandwidthMode} onLowBandwidthChange={setLowBandwidthMode} navigateTo={navigateTo} />;
-    return (
-      <div className="homepage-container">
-        {/* Subtle low bandwidth toggle at top right */}
-        <div style={{ alignSelf: 'flex-end', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-          <input 
-            id="low-bw"
-            type="checkbox" 
-            checked={lowBandwidthMode} 
-            onChange={(e) => setLowBandwidthMode(e.target.checked)} 
-            style={{ cursor: 'pointer' }}
-          />
-          <label htmlFor="low-bw" style={{ cursor: 'pointer', userSelect: 'none' }}>Low Bandwidth Mode</label>
-        </div>
-
-        <div className="homepage-logo">
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-          </svg>
-          <h1>VaaniDoc</h1>
-        </div>
-
-        <div className="homepage-hero">
-          <div className="hero-eyebrow"><span></span> Built for low-connectivity clinics</div>
-          <h2>"Speak naturally. Let the doctor focus on care."</h2>
-          <p>
-            VaaniDoc converts multilingual patient conversations into structured clinical intake information for doctors.
-          </p>
-        </div>
-
-        <div className="trust-strip" aria-label="VaaniDoc capabilities">
-          <div><strong>11+</strong><span>Language paths</span></div>
-          <div><strong>&lt; 1.2 KB</strong><span>Text-first payload</span></div>
-          <div><strong>Session-only</strong><span>Data lifecycle</span></div>
-          <div><strong>20 cases</strong><span>Validation suite</span></div>
-        </div>
-
-        <div className="homepage-grid">
-          <div className="feature-card">
-            <div className="feature-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                <line x1="12" x2="12" y1="19" y2="22"/>
-              </svg>
-            </div>
-            <h3>Speak in Your Language</h3>
-            <p>Patients can communicate naturally using supported Indian regional languages or type their concerns.</p>
-          </div>
-
-          <div className="feature-card">
-            <div className="feature-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-                <polyline points="10 9 9 9 8 9"/>
-              </svg>
-            </div>
-            <h3>Structured Clinical Intake</h3>
-            <p>AI organizes symptoms, duration, severity, and urgency into a clean EHR chart for clinical teams.</p>
-          </div>
-
-          <div className="feature-card">
-            <div className="feature-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-            </div>
-            <h3>Privacy First</h3>
-            <p>Patient information exists only for the active consultation session and is deleted immediately upon completion.</p>
-          </div>
-        </div>
-
-        <div className="homepage-cta-group">
-          <button 
-            type="button" 
-            className="btn btn-primary" 
-            onClick={() => navigateTo('/patient')}
-          >
-            Start patient intake <span aria-hidden="true">→</span>
-          </button>
-          <button 
-            type="button" 
-            className="btn" 
-            onClick={() => navigateTo('/doctor')}
-          >
-            Open clinician dashboard
-          </button>
-        </div>
-
-        <div style={{ marginTop: '2rem' }}>
-          <button 
-            type="button" 
-            className="back-to-home" 
-            style={{ fontSize: '0.75rem' }}
-            onClick={() => navigateTo('/validation')}
-          >
-            📊 View AI Validation Dashboard
-          </button>
-        </div>
-
-        {renderDisclaimer()}
-      </div>
-    );
+    return <LandingPage navigateTo={navigateTo} />;
   }
 
   // 2. Render validation report dashboard (Route: /validation)
@@ -416,7 +310,7 @@ function App() {
       </header>
 
       {/* Main App Page */}
-      <main className="main-content">
+      <main className={`main-content ${currentPath === '/doctor' ? 'doctor-main-content' : ''}`}>
         {currentPath === '/patient' ? (
           <PatientIntake isOnline={isOnline} onNewIntakeCreated={handleNewIntakeCreated} lowBandwidthMode={lowBandwidthMode} />
         ) : (

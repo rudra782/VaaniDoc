@@ -2,23 +2,17 @@ import React from 'react';
 import { BlurText } from './BlurText';
 
 interface LandingPageProps {
-  lowBandwidthMode: boolean;
-  onLowBandwidthChange: (enabled: boolean) => void;
   navigateTo: (path: string) => void;
 }
 
 const Icon = ({ children }: { children: React.ReactNode }) => <div className="feature-icon">{children}</div>;
 
-export const LandingPage: React.FC<LandingPageProps> = ({ lowBandwidthMode, onLowBandwidthChange, navigateTo }) => (
+export const LandingPage: React.FC<LandingPageProps> = ({ navigateTo }) => (
   <div className="landing-page">
     <header className="landing-nav">
       <button className="brand-lockup" onClick={() => navigateTo('/')} aria-label="VaaniDoc home">
         <span className="brand-mark">V</span><span>VaaniDoc</span>
       </button>
-      <div className="landing-nav-actions">
-        <label className="bandwidth-toggle"><input type="checkbox" checked={lowBandwidthMode} onChange={(e) => onLowBandwidthChange(e.target.checked)} /><span>Low bandwidth</span></label>
-        <button className="nav-link" onClick={() => navigateTo('/validation')}>Validation</button>
-      </div>
     </header>
 
     <main className="landing-hero">
