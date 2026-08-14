@@ -416,7 +416,7 @@ function App() {
       </header>
 
       {/* Main App Page */}
-      <main className="main-content">
+      <main className={`main-content ${currentPath === '/doctor' ? 'doctor-main-content' : ''}`}>
         {currentPath === '/patient' ? (
           <PatientIntake isOnline={isOnline} onNewIntakeCreated={handleNewIntakeCreated} lowBandwidthMode={lowBandwidthMode} />
         ) : (
