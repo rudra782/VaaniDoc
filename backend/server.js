@@ -123,7 +123,13 @@ function mapIntakeSession(session) {
   ).toLowerCase();
 
   // Deterministic safety check for emergency red flags (Section 13)
-  const red_flags = [];
+  const red_flags = Array.isArray(session.redFlags)
+    ? [...session.redFlags]
+    : Array.isArray(session.red_flags)
+      ? [...session.red_flags]
+      : Array.isArray(session.data?.red_flags)
+        ? [...session.data.red_flags]
+        : [];
   const lowercaseText = (session.originalSymptomsText || "").toLowerCase();
 
   if (
@@ -133,7 +139,9 @@ function mapIntakeSession(session) {
     lowercaseText.includes("శ్యాస") ||
     lowercaseText.includes("শ্বাস")
   ) {
-    red_flags.push("Difficulty breathing / Respiratory distress");
+    if (!red_flags.some((flag) => /breath|respirat/i.test(flag))) {
+      red_flags.push("Difficulty breathing / Respiratory distress");
+    }
     urgency = "high";
   }
 
@@ -144,7 +152,9 @@ function mapIntakeSession(session) {
     lowercaseText.includes("గుండె నొప్పి") ||
     lowercaseText.includes("বুকে ব্যথা")
   ) {
-    red_flags.push("Severe chest pain / Suspected cardiac event");
+    if (!red_flags.some((flag) => /chest|cardiac|heart/i.test(flag))) {
+      red_flags.push("Severe chest pain / Suspected cardiac event");
+    }
     urgency = "emergency";
   }
 
@@ -155,7 +165,9 @@ function mapIntakeSession(session) {
     lowercaseText.includes("பக்கவாதம்") ||
     lowercaseText.includes("పక్షవాతం")
   ) {
-    red_flags.push("Sudden severe neurological symptoms / Stroke");
+    if (!red_flags.some((flag) => /stroke|neurolog|paralysis/i.test(flag))) {
+      red_flags.push("Sudden severe neurological symptoms / Stroke");
+    }
     urgency = "emergency";
   }
 
@@ -195,6 +207,11 @@ function mapIntakeSession(session) {
         session.patient_friendly_summary ??
         session.data?.patient_friendly_summary;
 
+  const clinicalSummary =
+    session.clinicalSummary ?? session.clinical_summary ?? session.data?.clinical_summary;
+  const urgencyReason =
+    session.urgencyReason ?? session.urgency_reason ?? session.data?.urgency_reason;
+
   const data = {
     language,
     translated_text,
@@ -208,6 +225,9 @@ function mapIntakeSession(session) {
     smart_questions: smartQuestions,
     treatment_draft: treatmentDraft,
     patient_friendly_summary: patientFriendlySummary,
+    clinical_summary: clinicalSummary,
+    symptom_categories: symptomCategories,
+    urgency_reason: urgencyReason,
   };
 
   return {
@@ -241,6 +261,9 @@ function mapIntakeSession(session) {
     smartQuestions,
     treatmentDraft,
     patientFriendlySummary,
+    clinicalSummary,
+    urgencyReason,
+    redFlags: red_flags,
 
     success: true,
     data,

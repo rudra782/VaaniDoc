@@ -62,6 +62,11 @@ const intakeSchema = {
       description:
         "A draft clinical care plan detailing rest, fluid guidelines, precautions, and standard safety-net instructions (emergency thresholds). Do not specify Rx medications.",
     },
+    redFlags: {
+      type: "ARRAY",
+      items: { type: "STRING" },
+      description: "Only warning signs supported by the patient's reported symptoms; empty when none are detected.",
+    },
     patientFriendlySummary: {
       type: "STRING",
       description:
@@ -86,6 +91,7 @@ const intakeSchema = {
     "suggestedSpecialist",
     "smartQuestions",
     "treatmentDraft",
+    "redFlags",
     "patientFriendlySummary",
   ],
 };
@@ -158,6 +164,9 @@ const FAST_PATH_KEYWORDS = [
   "பலவீனம்",
   "బలహీనత",
   "injury",
+  "knee",
+  "joint",
+  "hurt",
   "chot",
   "चोट",
   "காயம்",
@@ -333,6 +342,7 @@ function getMockAnalysis(text, language, patientDetails) {
   let patientSummary = language.startsWith("Hindi")
     ? "कृपया आराम करें और पर्याप्त पानी पीएं। यदि लक्षण बने रहते हैं तो डॉक्टर से संपर्क करें।"
     : "Please rest and drink plenty of fluids. Consult a medical professional if your symptoms worsen.";
+  let redFlags = [];
 
   // Very basic heuristic for standard symptoms in Hindi/English
   if (
@@ -341,33 +351,49 @@ function getMockAnalysis(text, language, patientDetails) {
     (lowerText.includes("दर्द") &&
       (lowerText.includes("छाती") || lowerText.includes("दिल")))
   ) {
-    translatedText =
-      "I have severe pain in my chest, it feels heavy and radiates to my left arm.";
+    translatedText = text;
     chiefComplaint = "Chest Pain / Suspected Cardiac Event";
-    duration = "Since 1 hour";
+    duration = extractDuration(text);
     severity = "Severe";
     urgency = "Emergency";
     reason =
       "Acute chest pain with radiation risks cardiac arrest or myocardial infarction.";
     specialist = "Cardiologist";
     categories = ["Cardiovascular"];
-    associated = ["Shortness of breath", "Sweating"];
+    associated = [lowerText.includes("arm") ? "Pain radiating to arm" : null, lowerText.includes("sweat") ? "Sweating" : null, lowerText.includes("breath") ? "Shortness of breath" : null].filter(Boolean);
+    redFlags = ["Chest pressure or pain spreading to the arm, jaw, neck, or back"];
+    if (/sweat|faint|breath/.test(lowerText)) redFlags.push("Chest discomfort with sweating, faintness, or severe breathing difficulty");
     questions = [
       "Does the chest pain radiate to your neck, back, or jaw?",
       "Are you experiencing any difficulty breathing or cold sweating?",
       "Do you have a history of heart conditions or high blood pressure?",
     ];
     treatment =
-      "Immobilize the patient immediately. Check vitals and prepare for emergency transport. Administer low-dose aspirin if indicated and not contraindicated.";
+      "Keep the patient at rest and arrange immediate emergency evaluation and transport. Do not allow the patient to drive; escalate at once if pain persists, breathing worsens, or consciousness changes.";
     patientSummary = language.startsWith("Hindi")
       ? "आपातकालीन स्थिति: तुरंत आराम करें और बिना देर किए नजदीकी अस्पताल के आपातकालीन विभाग में जाएं।"
       : "Emergency warning: Please rest immediately and proceed to the nearest emergency department without delay.";
+  } else if (
+    lowerText.includes("cough") || lowerText.includes("breath") || lowerText.includes("खांसी") || lowerText.includes("सांस")
+  ) {
+    translatedText = text;
+    chiefComplaint = "Cough / Breathing Symptoms";
+    duration = extractDuration(text);
+    severity = lowerText.includes("shortness") || lowerText.includes("difficulty") ? "High" : "Medium";
+    urgency = severity === "High" ? "High" : "Medium";
+    reason = "Cough with reported breathing symptoms needs prompt respiratory assessment.";
+    specialist = "Pulmonology";
+    categories = ["Respiratory", ...(lowerText.includes("fever") ? ["Infectious Diseases"] : [])];
+    associated = [lowerText.includes("fever") ? "Fever" : null, lowerText.includes("shortness") ? "Shortness of breath" : null].filter(Boolean);
+    questions = ["Is the cough dry, or are you bringing up phlegm or blood?", "Are you short of breath at rest, unable to speak full sentences, or having chest pain?", "What was the highest temperature, and have symptoms worsened over the last day?"];
+    treatment = "Rest, take frequent fluids if able, and avoid smoke or strenuous activity while awaiting clinical review. Seek urgent care now if breathing is difficult at rest, lips appear blue, confusion develops, or symptoms rapidly worsen.";
+    redFlags = lowerText.includes("shortness") || lowerText.includes("difficulty breathing") ? ["Shortness of breath that is severe, occurs at rest, or prevents full sentences"] : [];
   } else if (
     lowerText.includes("fever") ||
     lowerText.includes("बुखार") ||
     lowerText.includes("कफ") ||
     lowerText.includes("खांसी") ||
-    lowerText.includes("cough")
+    lowerText.includes("weakness")
   ) {
     translatedText = "I have a high fever and a cough for the last three days.";
     chiefComplaint = "Fever and Cough";
@@ -383,8 +409,8 @@ function getMockAnalysis(text, language, patientDetails) {
       "Are you experiencing any shortness of breath or chest discomfort when coughing?",
       "Have you noticed daily fluctuations in your body temperature?",
     ];
-    treatment =
-      "Keep hydrated with oral fluids. Rest extensively. Take paracetamol for fever reduction as needed. Seek re-evaluation if you notice shortness of breath.";
+    treatment = "Rest and take frequent fluids if able. Arrange clinical review if fever persists or weakness worsens; seek urgent care for confusion, fainting, breathing difficulty, or inability to drink.";
+    questions = ["What was the highest measured temperature and when did the fever start?", "Can you drink and pass urine normally, or are you unusually drowsy or weak?", "Are there localizing symptoms such as cough, pain, rash, vomiting, or urinary burning?"];
     patientSummary = language.startsWith("Hindi")
       ? "आपको बुखार और खांसी है। पर्याप्त आराम करें, गुनगुना पानी पिएं और जरूरत पड़ने पर डॉक्टर से संपर्क करें।"
       : "You have a fever and cough. Take plenty of rest, stay hydrated, and consult a doctor if symptoms persist.";
@@ -401,10 +427,9 @@ function getMockAnalysis(text, language, patientDetails) {
     lowerText.includes("vomit") ||
     lowerText.includes("उल्टी")
   ) {
-    translatedText =
-      "My stomach is hurting severely and I have vomited three times.";
+    translatedText = text;
     chiefComplaint = "Abdominal Pain and Vomiting";
-    duration = "Since morning";
+    duration = extractDuration(text);
     severity = "High";
     urgency = "High";
     reason =
@@ -412,16 +437,22 @@ function getMockAnalysis(text, language, patientDetails) {
     specialist = "Gastroenterologist";
     categories = ["Gastrointestinal"];
     associated = ["Nausea", "Dehydration risk"];
+    redFlags = ["Repeated vomiting with inability to keep fluids down or markedly reduced urination", "Blood in vomit or stool, fainting, or severe/worsening abdominal pain"];
     questions = [
       "Where exactly is the pain located in your abdomen?",
       "Are you able to keep any fluids or water down?",
       "Have you observed any fever, diarrhea, or blood in your stool or vomit?",
     ];
-    treatment =
-      "Frequent small sips of Oral Rehydration Solution (ORS). Avoid solid foods for a few hours. Seek medical attention if vomiting persists beyond 12 hours.";
+    treatment = "Take frequent small sips of oral rehydration fluid if tolerated and rest. Seek prompt assessment if vomiting continues; seek urgent care for inability to retain fluids, very little urine, fainting, blood, or severe worsening pain.";
     patientSummary = language.startsWith("Hindi")
       ? "पेट दर्द और उल्टी के कारण ओ.आर.एस. का घोल धीरे-धीरे पीते रहें। आराम करें और जल्द ही चिकित्सक को दिखाएं।"
       : "Drink ORS solution slowly to stay hydrated. Rest and consult a physician soon.";
+  } else if (/headache|stroke|paralysis|speech|one-sided|weakness/.test(lowerText)) {
+    translatedText = text; chiefComplaint = "Headache / Neurological Symptoms"; duration = extractDuration(text); severity = /stroke|paralysis|speech|one-sided/.test(lowerText) ? "Severe" : "Medium"; urgency = severity === "Severe" ? "Emergency" : "Medium"; reason = severity === "Severe" ? "Possible sudden focal neurological deficit requires emergency evaluation." : "Headache requires assessment for severity and neurological warning signs."; specialist = severity === "Severe" ? "Emergency Medicine" : "Neurology"; categories = ["Neurological"]; associated = /weakness/.test(lowerText) ? ["Weakness"] : []; questions = ["Did the headache begin suddenly, and is it the worst headache you have experienced?", "Is there new weakness, facial droop, speech difficulty, confusion, seizure, or vision loss?", "Have you had fever, neck stiffness, head injury, or repeated vomiting?"]; treatment = "Rest in a safe quiet place while arranging clinical review. Call emergency services immediately for sudden weakness, facial droop, speech difficulty, seizure, confusion, collapse, or an abrupt severe headache."; redFlags = /stroke|paralysis|speech|one-sided/.test(lowerText) ? ["New weakness or paralysis, facial droop, or speech difficulty consistent with a stroke warning"] : [];
+  } else if (/rash|itch|itchy|खुजली/.test(lowerText)) {
+    translatedText = text; chiefComplaint = "Itchy Rash"; duration = extractDuration(text); severity = "Low"; urgency = "Low"; reason = "Localized itchy rash without a reported systemic warning sign is suitable for routine skin assessment."; specialist = "Dermatology"; categories = ["Dermatological"]; associated = ["Itching", "Redness"]; questions = ["Did you use a new soap, medicine, food, plant, or other product before the rash began?", "Is the rash spreading, blistering, painful, warm, or associated with fever?", "Is there swelling of the lips or tongue, wheezing, or difficulty breathing?"]; treatment = "Avoid suspected new irritants, scratching, and fragranced products; keep the skin clean and cool pending clinical review. Seek emergency help for facial or tongue swelling, wheezing, breathing difficulty, widespread blistering, or faintness."; redFlags = [];
+  } else if (/knee|joint|injury|hurt|football|fracture|swelling/.test(lowerText)) {
+    translatedText = text; chiefComplaint = "Knee / Musculoskeletal Injury"; duration = extractDuration(text); severity = "Medium"; urgency = "Medium"; reason = "An acute joint injury needs examination for stability, circulation, and ability to bear weight."; specialist = "Orthopedics"; categories = ["Musculoskeletal"]; associated = lowerText.includes("swelling") ? ["Swelling"] : []; questions = ["How did the injury happen—twist, direct impact, fall, or collision—and did you hear a pop?", "Can you bear weight and bend or straighten the knee?", "Is there marked swelling, deformity, numbness, or a cold or pale foot?"]; treatment = "Stop sports, protect the knee, rest it, use a wrapped cool pack briefly, and elevate it while awaiting assessment. Seek urgent care for deformity, inability to bear weight, rapidly increasing swelling, numbness, or a cold or pale foot."; redFlags = [];
   }
 
   const mockResult = {
@@ -442,6 +473,7 @@ function getMockAnalysis(text, language, patientDetails) {
     suggestedSpecialist: specialist,
     smartQuestions: questions,
     treatmentDraft: treatment,
+    redFlags,
     patientFriendlySummary: patientSummary,
   };
 
@@ -470,6 +502,10 @@ function getMockAnalysis(text, language, patientDetails) {
     ...mockResult,
     confidence: calculateExtractionConfidence(text, mockResult),
   };
+}
+
+function extractDuration(text) {
+  return String(text).match(/(?:for|since)\s+([^,.]+)/i)?.[1]?.trim() || "Not specified";
 }
 
 export function calculateExtractionConfidence(text, analysis = {}) {
@@ -595,11 +631,8 @@ function normalizeAnalysis(result, text, language, patientDetails) {
   const severity = ["Low", "Medium", "High", "Severe"].includes(result.severity)
     ? result.severity
     : "Medium";
-  const defaultQuestions = [
-    "When did these symptoms begin, and are they getting worse?",
-    "Have you had similar symptoms or relevant medical conditions before?",
-    "Is there any symptom or activity that makes this better or worse?",
-  ];
+  const fallback = getMockAnalysis(text, language, patientDetails);
+  const defaultQuestions = fallback.smartQuestions;
   const smartQuestions = Array.isArray(result.smartQuestions)
     ? result.smartQuestions.slice(0, 3).map(String)
     : [];
@@ -632,9 +665,9 @@ function normalizeAnalysis(result, text, language, patientDetails) {
     suggestedSpecialist: resolveSuggestedSpecialist(result, text),
     smartQuestions,
     treatmentDraft: String(
-      result.treatmentDraft ||
-        "Provide supportive care and seek clinical review if symptoms worsen.",
+      result.treatmentDraft || fallback.treatmentDraft,
     ),
+    redFlags: Array.isArray(result.redFlags) ? result.redFlags.slice(0, 8).map(String) : fallback.redFlags,
     patientFriendlySummary: String(
       result.patientFriendlySummary ||
         "Please consult the clinic team for the next steps.",
@@ -651,7 +684,7 @@ export async function analyzeSymptoms(text, language, patientDetails = {}) {
   if (!text || text.trim() === "")
     throw new Error("Symptom description cannot be empty.");
 
-  const system = `You are VaaniDoc, a clinical intake and safety-triage assistant for supervised rural clinics in India. You do not diagnose, prescribe medicines, recommend procedures, administer treatments, or invent facts. Translate regional Indian languages and transliterated Hinglish into concise clinical English. Escalate Emergency for time-critical red flags such as chest pain with sweating/radiation, stroke signs, severe breathing difficulty, major bleeding, seizures, or altered consciousness. Return only valid JSON with these exact keys: translatedSymptomsText, chiefComplaint, clinicalSummary, duration, severity, associatedSymptoms, symptomCategories, urgencyClassification, urgencyReason, suggestedSpecialist, smartQuestions, treatmentDraft, patientFriendlySummary. suggestedSpecialist is routing guidance, not a diagnosis: choose the most appropriate department from the analyzed symptoms and category, and use Emergency Medicine when red flags require emergency routing. severity must be Low, Medium, High, or Severe. urgencyClassification must be Low, Medium, High, or Emergency. smartQuestions must contain exactly 3 questions. treatmentDraft must only say supportive non-pharmacological measures and clear escalation instructions; never name medicines, oxygen, procedures, tests, or definitive treatments.`;
+  const system = `You are VaaniDoc, a clinical intake and safety-triage assistant for supervised rural clinics in India. You do not diagnose, prescribe medicines, recommend procedures, administer treatments, or invent facts. Translate regional Indian languages and transliterated Hinglish into concise clinical English. Escalate Emergency for time-critical red flags such as chest pain with sweating/radiation, stroke signs, severe breathing difficulty, major bleeding, seizures, or altered consciousness. Return only valid JSON with these exact keys: translatedSymptomsText, chiefComplaint, clinicalSummary, duration, severity, associatedSymptoms, symptomCategories, urgencyClassification, urgencyReason, suggestedSpecialist, smartQuestions, treatmentDraft, redFlags, patientFriendlySummary. Every clinical field must be specific to the supplied narration. redFlags must contain only warning signs supported by the narration (or be empty). suggestedSpecialist is routing guidance, not a diagnosis: choose the most appropriate department from the analyzed symptoms and category, and use Emergency Medicine when red flags require emergency routing. severity must be Low, Medium, High, or Severe. urgencyClassification must be Low, Medium, High, or Emergency. smartQuestions must contain exactly 3 symptom-specific questions. treatmentDraft must only say patient-specific supportive non-pharmacological measures and clear escalation instructions; never name medicines, oxygen, procedures, tests, or definitive treatments.`;
   const user = JSON.stringify({
     patientLanguage: language,
     demographics: {
