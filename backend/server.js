@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import {
   analyzeSymptoms,
   calculateExtractionConfidence,
+  resolveSuggestedSpecialist,
 } from "./geminiService.js";
 
 dotenv.config();
@@ -106,9 +107,14 @@ function mapIntakeSession(session) {
     session.chiefComplaint ||
     session.chief_complaint ||
     (symptoms[0] ? symptoms[0].name : "General consultation");
-  const possible_category = Array.isArray(session.symptomCategories)
-    ? session.symptomCategories[0]
-    : session.possible_category || "General Medicine";
+  const symptomCategories = Array.isArray(session.symptomCategories)
+    ? session.symptomCategories
+    : Array.isArray(session.symptom_categories)
+      ? session.symptom_categories
+      : session.possible_category
+        ? [session.possible_category]
+        : ["General Medicine"];
+  const possible_category = session.possible_category || symptomCategories[0];
 
   let urgency = (
     session.urgencyClassification ||
@@ -130,6 +136,7 @@ function mapIntakeSession(session) {
     red_flags.push("Difficulty breathing / Respiratory distress");
     urgency = "high";
   }
+
   if (
     lowercaseText.includes("chest pain") ||
     lowercaseText.includes("सीना दर्द") ||
@@ -140,6 +147,7 @@ function mapIntakeSession(session) {
     red_flags.push("Severe chest pain / Suspected cardiac event");
     urgency = "emergency";
   }
+
   if (
     lowercaseText.includes("stroke") ||
     lowercaseText.includes("paralysis") ||
@@ -150,6 +158,16 @@ function mapIntakeSession(session) {
     red_flags.push("Sudden severe neurological symptoms / Stroke");
     urgency = "emergency";
   }
+
+  const suggestedSpecialist = resolveSuggestedSpecialist(
+    {
+      ...session,
+      symptomCategories,
+      possible_category,
+      urgencyClassification: urgency,
+    },
+    session.originalSymptomsText || translated_text,
+  );
 
   const confidence =
     typeof session.confidence === "number"
@@ -183,6 +201,7 @@ function mapIntakeSession(session) {
     chief_complaint,
     symptoms,
     possible_category,
+    suggested_specialist: suggestedSpecialist,
     red_flags,
     urgency: urgency.toUpperCase(),
     confidence,
@@ -198,6 +217,7 @@ function mapIntakeSession(session) {
     chief_complaint,
     symptoms,
     possible_category,
+    suggested_specialist: suggestedSpecialist,
     red_flags,
     urgency: urgency.toUpperCase(),
     confidence,
@@ -206,9 +226,8 @@ function mapIntakeSession(session) {
     languageSpoken: language,
     translatedSymptomsText: translated_text,
     chiefComplaint: chief_complaint,
-    symptomCategories: Array.isArray(session.symptomCategories)
-      ? session.symptomCategories
-      : [possible_category],
+    symptomCategories,
+    suggestedSpecialist,
     associatedSymptoms: symptoms.map((s) => s.name),
     urgencyClassification:
       urgency.toUpperCase() === "EMERGENCY"

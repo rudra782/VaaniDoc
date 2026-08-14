@@ -198,6 +198,69 @@ function shouldUseFastLocalPath(text = "") {
   return hasClinicalKeyword || wordCount <= 20;
 }
 
+const GENERIC_SPECIALISTS = new Set([
+  "",
+  "general consultation",
+  "general physician",
+  "general practitioner",
+  "general medicine",
+  "not specified",
+  "unknown",
+]);
+
+export function resolveSuggestedSpecialist(analysis = {}, symptomText = "") {
+  const urgency = String(
+    analysis.urgencyClassification ?? analysis.urgency ?? "",
+  ).toLowerCase();
+  if (urgency === "emergency") return "Emergency Medicine";
+
+  const supplied = String(
+    analysis.suggestedSpecialist ?? analysis.suggested_specialist ?? "",
+  ).trim();
+  if (supplied && !GENERIC_SPECIALISTS.has(supplied.toLowerCase())) {
+    return supplied;
+  }
+
+  const categories = Array.isArray(analysis.symptomCategories)
+    ? analysis.symptomCategories
+    : Array.isArray(analysis.symptom_categories)
+      ? analysis.symptom_categories
+      : [analysis.possible_category];
+  const routingText = [
+    symptomText,
+    analysis.chiefComplaint,
+    analysis.chief_complaint,
+    analysis.translatedSymptomsText,
+    ...categories,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const routes = [
+    [/chest|cardiac|cardiovascular|heart|सीना|छाती/, "Cardiology"],
+    [/breath|dyspnea|respirat|pulmon|asthma|सांस/, "Pulmonology"],
+    [
+      /stroke|seizure|neurolog|paralysis|severe headache|sudden weakness|one-sided weakness|लकवा/,
+      "Neurology",
+    ],
+    [
+      /abdom|stomach|gastro|vomit|diarrh|पेट|उल्टी|दस्त/,
+      "Gastroenterology",
+    ],
+    [/skin|dermat|rash|itch|खुजली/, "Dermatology"],
+    [/bone|joint|knee|musculoskel|orthop|fracture|injury/, "Orthopedics"],
+    [/eye|ophthalm|vision/, "Ophthalmology"],
+    [/\bent\b|ear|nose|throat|otolaryng/, "ENT / Otolaryngology"],
+    [/kidney|renal|nephro/, "Nephrology"],
+    [/urinary|urine|bladder|urolog/, "Urology"],
+  ];
+  return (
+    routes.find(([pattern]) => pattern.test(routingText))?.[1] ||
+    "General Medicine"
+  );
+}
+
 function getQuickLocalAnalysis(text, language, patientDetails) {
   const lowerText = text.toLowerCase();
 
@@ -325,6 +388,12 @@ function getMockAnalysis(text, language, patientDetails) {
     patientSummary = language.startsWith("Hindi")
       ? "आपको बुखार और खांसी है। पर्याप्त आराम करें, गुनगुना पानी पिएं और जरूरत पड़ने पर डॉक्टर से संपर्क करें।"
       : "You have a fever and cough. Take plenty of rest, stay hydrated, and consult a doctor if symptoms persist.";
+    if (!lowerText.includes("cough") && !lowerText.includes("खांसी")) {
+      chiefComplaint = "Fever and general symptoms";
+      specialist = "General Medicine";
+      categories = ["General Medicine"];
+      associated = lowerText.includes("weakness") ? ["Weakness"] : [];
+    }
   } else if (
     lowerText.includes("stomach") ||
     lowerText.includes("पेट") ||
@@ -375,6 +444,27 @@ function getMockAnalysis(text, language, patientDetails) {
     treatmentDraft: treatment,
     patientFriendlySummary: patientSummary,
   };
+
+  mockResult.suggestedSpecialist = resolveSuggestedSpecialist(mockResult, text);
+  if (mockResult.chiefComplaint === "General consultation") {
+    const categoryBySpecialist = {
+      Pulmonology: "Respiratory",
+      Neurology: "Neurological",
+      Gastroenterology: "Gastrointestinal",
+      Dermatology: "Dermatological",
+      Orthopedics: "Musculoskeletal",
+      Ophthalmology: "Ophthalmological",
+      "ENT / Otolaryngology": "ENT",
+      Nephrology: "Renal",
+      Urology: "Urinary",
+    };
+    const routedCategory = categoryBySpecialist[mockResult.suggestedSpecialist];
+    if (routedCategory) {
+      mockResult.symptomCategories = [routedCategory];
+      mockResult.chiefComplaint = `Reported ${routedCategory} symptoms`;
+      mockResult.clinicalSummary = `Patient reports symptoms requiring ${routedCategory.toLowerCase()} evaluation. Narrative: ${text}`;
+    }
+  }
 
   return {
     ...mockResult,
@@ -539,9 +629,7 @@ function normalizeAnalysis(result, text, language, patientDetails) {
     urgencyReason: String(
       result.urgencyReason || "Clinical review is recommended.",
     ),
-    suggestedSpecialist: String(
-      result.suggestedSpecialist || "General Physician",
-    ),
+    suggestedSpecialist: resolveSuggestedSpecialist(result, text),
     smartQuestions,
     treatmentDraft: String(
       result.treatmentDraft ||
@@ -563,7 +651,7 @@ export async function analyzeSymptoms(text, language, patientDetails = {}) {
   if (!text || text.trim() === "")
     throw new Error("Symptom description cannot be empty.");
 
-  const system = `You are VaaniDoc, a clinical intake and safety-triage assistant for supervised rural clinics in India. You do not diagnose, prescribe medicines, recommend procedures, administer treatments, or invent facts. Translate regional Indian languages and transliterated Hinglish into concise clinical English. Escalate Emergency for time-critical red flags such as chest pain with sweating/radiation, stroke signs, severe breathing difficulty, major bleeding, seizures, or altered consciousness. Return only valid JSON with these exact keys: translatedSymptomsText, chiefComplaint, clinicalSummary, duration, severity, associatedSymptoms, symptomCategories, urgencyClassification, urgencyReason, suggestedSpecialist, smartQuestions, treatmentDraft, patientFriendlySummary. severity must be Low, Medium, High, or Severe. urgencyClassification must be Low, Medium, High, or Emergency. smartQuestions must contain exactly 3 questions. treatmentDraft must only say supportive non-pharmacological measures and clear escalation instructions; never name medicines, oxygen, procedures, tests, or definitive treatments.`;
+  const system = `You are VaaniDoc, a clinical intake and safety-triage assistant for supervised rural clinics in India. You do not diagnose, prescribe medicines, recommend procedures, administer treatments, or invent facts. Translate regional Indian languages and transliterated Hinglish into concise clinical English. Escalate Emergency for time-critical red flags such as chest pain with sweating/radiation, stroke signs, severe breathing difficulty, major bleeding, seizures, or altered consciousness. Return only valid JSON with these exact keys: translatedSymptomsText, chiefComplaint, clinicalSummary, duration, severity, associatedSymptoms, symptomCategories, urgencyClassification, urgencyReason, suggestedSpecialist, smartQuestions, treatmentDraft, patientFriendlySummary. suggestedSpecialist is routing guidance, not a diagnosis: choose the most appropriate department from the analyzed symptoms and category, and use Emergency Medicine when red flags require emergency routing. severity must be Low, Medium, High, or Severe. urgencyClassification must be Low, Medium, High, or Emergency. smartQuestions must contain exactly 3 questions. treatmentDraft must only say supportive non-pharmacological measures and clear escalation instructions; never name medicines, oxygen, procedures, tests, or definitive treatments.`;
   const user = JSON.stringify({
     patientLanguage: language,
     demographics: {

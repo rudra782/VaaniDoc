@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { QRCodeSVG } from 'qrcode.react';
 import API_URL from '../config';
-import { createQrMatrix } from '../utils/qrCode';
 
 const escapeHtml = (value: unknown) => String(value ?? '')
   .replaceAll('&', '&amp;')
@@ -9,22 +9,6 @@ const escapeHtml = (value: unknown) => String(value ?? '')
   .replaceAll('>', '&gt;')
   .replaceAll('"', '&quot;')
   .replaceAll("'", '&#039;');
-
-const LocalQrCode: React.FC<{ value: string }> = ({ value }) => {
-  try {
-    const matrix = createQrMatrix(value);
-    const quietZone = 4;
-    const size = matrix.length + quietZone * 2;
-    return (
-      <svg className="handout-qr" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="QR code containing this patient's handout summary" shapeRendering="crispEdges">
-        <rect width={size} height={size} fill="#ffffff" />
-        {matrix.flatMap((row, y) => row.map((dark, x) => dark ? <rect key={`${x}-${y}`} x={x + quietZone} y={y + quietZone} width="1" height="1" fill="#0f172a" /> : null))}
-      </svg>
-    );
-  } catch (error) {
-    return <div className="qr-error" role="alert">{error instanceof Error ? error.message : 'Unable to create QR code.'}</div>;
-  }
-};
 
 interface IntakeSession {
   sessionId: string;
@@ -243,13 +227,14 @@ ${selectedSession.treatmentDraft || 'N/A'}
   };
 
   const selectedSession = sessions.find(s => s.sessionId === selectedSessionId);
+  const handoutSummary = selectedSession?.patientFriendlySummary?.trim().slice(0, 360);
   const handoutQrPayload = selectedSession ? [
     'VaaniDoc Patient Handout',
-    `Patient: ${selectedSession.patientName || 'Not provided'}`,
-    `Consult ID: ${selectedSession.sessionId || 'Not provided'}`,
-    `Language: ${selectedSession.languageSpoken || 'Not provided'}`,
-    `Summary: ${selectedSession.patientFriendlySummary || 'Not available'}`
-  ].join('\n') : '';
+    selectedSession.patientName?.trim() && `Patient: ${selectedSession.patientName.trim()}`,
+    selectedSession.sessionId?.trim() && `Consult ID: ${selectedSession.sessionId.trim()}`,
+    selectedSession.languageSpoken?.trim() && `Language: ${selectedSession.languageSpoken.trim()}`,
+    handoutSummary && `Summary: ${handoutSummary}`
+  ].filter(Boolean).join('\n') : '';
   const urgentCount = sessions.filter(s => s.urgencyClassification === 'Emergency' || s.urgencyClassification === 'High').length;
   const offlineCount = sessions.filter(s => s.isOfflineGenerated).length;
 
@@ -867,7 +852,17 @@ ${selectedSession.treatmentDraft || 'N/A'}
               borderRadius: '12px',
               marginBottom: '1.5rem'
             }}>
-              <LocalQrCode value={handoutQrPayload} />
+              <QRCodeSVG
+                className="handout-qr"
+                value={handoutQrPayload}
+                size={240}
+                level="H"
+                marginSize={4}
+                bgColor="#ffffff"
+                fgColor="#000000"
+                role="img"
+                aria-label="QR code containing this patient's handout summary"
+              />
             </div>
 
             <p className="qr-consult-id">Consult ID: <strong>{selectedSession.sessionId || 'Not provided'}</strong></p>
