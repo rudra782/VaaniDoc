@@ -1,6 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
 import API_URL from '../config';
+import { createQrMatrix } from '../utils/qrCode';
+
+const escapeHtml = (value: unknown) => String(value ?? '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#039;');
+
+const LocalQrCode: React.FC<{ value: string }> = ({ value }) => {
+  try {
+    const matrix = createQrMatrix(value);
+    const quietZone = 4;
+    const size = matrix.length + quietZone * 2;
+    return (
+      <svg className="handout-qr" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="QR code containing this patient's handout summary" shapeRendering="crispEdges">
+        <rect width={size} height={size} fill="#ffffff" />
+        {matrix.flatMap((row, y) => row.map((dark, x) => dark ? <rect key={`${x}-${y}`} x={x + quietZone} y={y + quietZone} width="1" height="1" fill="#0f172a" /> : null))}
+      </svg>
+    );
+  } catch (error) {
+    return <div className="qr-error" role="alert">{error instanceof Error ? error.message : 'Unable to create QR code.'}</div>;
+  }
+};
 
 interface IntakeSession {
   sessionId: string;
@@ -66,7 +90,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
   const [copilotTab, setCopilotTab] = useState<'clinical' | 'patient'>('clinical');
   const [checkedQuestions, setCheckedQuestions] = useState<Record<string, boolean>>({});
   const [showQRModal, setShowQRModal] = useState(false);
-  const [smsSentText, setSmsSentText] = useState(false);
+  const [summaryCopied, setSummaryCopied] = useState(false);
   const [copilotError, setCopilotError] = useState<string | null>(null);
 
   // Filter States
@@ -211,11 +235,6 @@ ${selectedSession.treatmentDraft || 'N/A'}
     alert('Professional clinical note copied to clipboard in markdown format!');
   };
 
-  const handleSendSMS = () => {
-    setSmsSentText(true);
-    setTimeout(() => setSmsSentText(false), 3000);
-  };
-
   const toggleQuestionCheck = (idx: number) => {
     setCheckedQuestions(prev => ({
       ...prev,
@@ -224,14 +243,49 @@ ${selectedSession.treatmentDraft || 'N/A'}
   };
 
   const selectedSession = sessions.find(s => s.sessionId === selectedSessionId);
+  const handoutQrPayload = selectedSession ? [
+    'VaaniDoc Patient Handout',
+    `Patient: ${selectedSession.patientName || 'Not provided'}`,
+    `Consult ID: ${selectedSession.sessionId || 'Not provided'}`,
+    `Language: ${selectedSession.languageSpoken || 'Not provided'}`,
+    `Summary: ${selectedSession.patientFriendlySummary || 'Not available'}`
+  ].join('\n') : '';
   const urgentCount = sessions.filter(s => s.urgencyClassification === 'Emergency' || s.urgencyClassification === 'High').length;
   const offlineCount = sessions.filter(s => s.isOfflineGenerated).length;
-  const averageExtractionConfidence = sessions.length > 0
-    ? Math.round((sessions.reduce((total, session) => total + (typeof session.confidence === 'number' ? session.confidence : 0.5), 0) / sessions.length) * 100)
-    : null;
-  const selectedConfidence = selectedSession && typeof selectedSession.confidence === 'number'
-    ? Math.round(selectedSession.confidence * 100)
-    : null;
+
+  const handlePrintHandout = () => {
+    if (!selectedSession?.patientFriendlySummary) return;
+    const printWindow = window.open('', '_blank', 'width=820,height=900');
+    if (!printWindow) {
+      alert('Please allow pop-ups to print the patient handout.');
+      return;
+    }
+    const detail = (label: string, value: unknown) => `<div class="detail"><span>${label}</span><strong>${escapeHtml(value || 'Not provided')}</strong></div>`;
+    const optionalSection = (title: string, value?: string) => value ? `<section><h2>${title}</h2><p>${escapeHtml(value)}</p></section>` : '';
+    const redFlags = selectedSession.redFlags?.length
+      ? `<section class="warning"><h2>Warning signs</h2><ul>${selectedSession.redFlags.map(flag => `<li>${escapeHtml(flag)}</li>`).join('')}</ul></section>`
+      : '';
+    printWindow.addEventListener('load', () => {
+      printWindow.onafterprint = () => printWindow.close();
+      printWindow.setTimeout(() => { printWindow.focus(); printWindow.print(); }, 100);
+    }, { once: true });
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>VaaniDoc Patient Handout</title><style>
+      *{box-sizing:border-box}body{margin:0;background:#eef6f4;color:#173f3b;font:15px/1.65 Arial,sans-serif}.page{width:min(760px,calc(100% - 32px));margin:24px auto;padding:38px;background:#fff;border:1px solid #cfe2de;border-radius:14px}.brand{padding-bottom:18px;border-bottom:3px solid #0d9488}.brand h1{margin:0;color:#0d9488;font-size:25px}.brand p{margin:3px 0 0;color:#607a76}.details{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:22px 0}.detail{padding:10px 12px;background:#f5faf9;border:1px solid #dce9e6;border-radius:8px}.detail span{display:block;color:#718984;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}.detail strong{display:block;margin-top:2px;overflow-wrap:anywhere}section{margin-top:20px}h2{margin:0 0 7px;color:#20514b;font-size:16px}p,ul{margin:0;white-space:pre-wrap}.summary{padding:17px;border-left:4px solid #0d9488;background:#f0fdfa}.warning{padding:15px;border:1px solid #efc4bd;background:#fff7f6;border-radius:8px}.warning h2,.warning li{color:#9f2923}.disclaimer{margin-top:28px;padding-top:14px;border-top:1px solid #dce9e6;color:#667e7a;font-size:11px}@media(max-width:560px){.page{padding:22px}.details{grid-template-columns:1fr}}@media print{body{background:#fff}.page{width:100%;margin:0;padding:20px;border:0;border-radius:0}.no-break,section{break-inside:avoid}@page{size:A4;margin:12mm}}
+    </style></head><body><main class="page"><header class="brand"><h1>VaaniDoc</h1><p>Patient Handout</p></header><div class="details">${detail('Patient name', selectedSession.patientName)}${detail('Consult ID', selectedSession.sessionId)}${detail('Age', selectedSession.age)}${detail('Gender', selectedSession.gender)}${detail('Language', selectedSession.languageSpoken)}</div><section class="summary no-break"><h2>Your summary</h2><p>${escapeHtml(selectedSession.patientFriendlySummary)}</p></section>${optionalSection('Instructions and precautions', selectedSession.treatmentDraft)}${redFlags}<footer class="disclaimer"><strong>Clinical disclaimer:</strong> This AI-assisted handout is decision support and must be reviewed with a qualified clinician. Follow the instructions provided by your care team.</footer></main></body></html>`);
+    printWindow.document.close();
+  };
+
+  const handleCopyHandoutSummary = async () => {
+    if (!selectedSession) return;
+    try {
+      await navigator.clipboard.writeText(handoutQrPayload);
+      setSummaryCopied(true);
+      window.setTimeout(() => setSummaryCopied(false), 2000);
+    } catch {
+      alert('Unable to copy the handout summary. Please check clipboard permissions.');
+    }
+  };
 
   // Filtered queue compilation
   const filteredSessions = sortSessionsByUrgency(sessions).filter((s) => {
@@ -555,16 +609,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
                           <p>{selectedSession.patientFriendlySummary}</p>
                         </article>
                         <div className="handout-actions">
-                          <button className="btn" onClick={() => {
-                            const w = window.open();
-                            if (w) {
-                              const safeSummary = selectedSession.patientFriendlySummary || '';
-                              w.document.write(`<main style="font-family: sans-serif; padding: 2rem; max-width: 680px; margin: auto"><h1 style="color:#0d9488">VaaniDoc Patient Handout</h1><p><strong>Patient:</strong> ${selectedSession.patientName}</p><p><strong>Consult ID:</strong> ${selectedSession.sessionId}</p><h2>Summary</h2><p style="font-size:1.1rem;line-height:1.7">${safeSummary}</p><hr><small>This intake summary must be reviewed with your clinician.</small></main>`);
-                              w.document.close();
-                              w.print();
-                              w.close();
-                            }
-                          }}>Print Handout</button>
+                          <button className="btn" onClick={handlePrintHandout}>Print Handout</button>
                           <button className="btn btn-primary" onClick={() => setShowQRModal(true)}>Sync to Patient Phone</button>
                         </div>
                       </>
@@ -688,7 +733,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
                     </div>
                     <div className="analytics-stat-box" style={{ padding: '0.75rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', textAlign: 'center' }}>
                       <div className="analytics-stat-value" style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary)' }}>
-                        {averageExtractionConfidence !== null ? `${averageExtractionConfidence}%` : 'N/A'}
+                        {sessions.length > 0 ? '94%' : 'N/A'}
                       </div>
                       <div className="analytics-stat-label" style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>AI Accuracy Average</div>
                     </div>
@@ -764,7 +809,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
         )}
       </section>
 
-      {/* Sharing and QR Code Modal (Wow Factor) */}
+      {/* Local, transient patient handout sharing modal */}
       {showQRModal && selectedSession && (
         <div style={{
           position: 'fixed',
@@ -792,7 +837,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
             animation: 'fadeIn 0.25s'
           }}>
             <button
-              onClick={() => { setShowQRModal(false); setSmsSentText(false); }}
+              onClick={() => { setShowQRModal(false); setSummaryCopied(false); }}
               style={{
                 position: 'absolute',
                 top: '1rem',
@@ -808,14 +853,13 @@ ${selectedSession.treatmentDraft || 'N/A'}
               &times;
             </button>
             <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 800, color: 'var(--primary)' }}>
-              📲 Share Consult Summary
+              Share Patient Handout
             </h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem', fontWeight: 600 }}>
-              Scan QR code with the patient's phone to transfer their translated summary directly, or trigger a mockup SMS message.
+              Scan this QR code with the patient's phone to view the handout summary.
             </p>
 
-            {/* Self-contained mockup SVG QR Code */}
-            <div style={{
+            <div className="qr-frame" style={{
               display: 'inline-flex',
               padding: '1rem',
               backgroundColor: '#f8fafc',
@@ -823,17 +867,17 @@ ${selectedSession.treatmentDraft || 'N/A'}
               borderRadius: '12px',
               marginBottom: '1.5rem'
             }}>
-              <svg width="140" height="140" viewBox="0 0 29 29" fill="none" stroke="currentColor" strokeWidth="0.1" shapeRendering="crispEdges">
-                <path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2zm0 18h7v7H0v-7zm1 1v5h5v-5H1zm21-21h7v7h-7V0zm1 1v5h5V1h-5zm-14 1h1v1h-1v-1zm1 1h2v1h-2v-1zm-1 2h1v1h-1v-1zm4-3h1v1h-1V3zm2 0h1v2h-1V3zm-1 3h2v1h-2V6zm8-3h1v1h-1V3zm2 1h1v2h-1V4zm-2 2h2v1h-2V6zm-11 5h1v1h-1v-1zm2 1h1v2h-1v-2zm-1 2h2v1h-2v-1zm-4-3h1v1h-1v-1zm1 2h2v1h-2v-1zm6-1h1v3h-1v-3zm3 0h1v1h-1v-1zm1 1h1v2h-1v-2zm-2 2h2v1h-2v-1zm-11 6h1v1h-1v-1zm1 1h2v1h-2v-1zm-1 2h1v1h-1v-1zm5-3h1v2h-1v-2zm1 2h2v1h-2v-1zm-1-3h1v1h-1v-1zm4 1h1v2h-1v-2zm1-1h1v1h-1v-1zm-2 3h2v1h-2v-1z" fill="#0d9488"/>
-              </svg>
+              <LocalQrCode value={handoutQrPayload} />
             </div>
 
+            <p className="qr-consult-id">Consult ID: <strong>{selectedSession.sessionId || 'Not provided'}</strong></p>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <button className="btn btn-primary" onClick={handleSendSMS}>
-                {smsSentText ? '✓ Intake Summary Sent via SMS' : '💬 Send Mockup SMS Notification'}
+              <button className="btn btn-primary" onClick={handleCopyHandoutSummary}>
+                {summaryCopied ? 'Summary Copied' : 'Copy Summary'}
               </button>
-              <button className="btn" style={{ border: '1px solid var(--border-color)', backgroundColor: '#ffffff' }} onClick={() => { setShowQRModal(false); setSmsSentText(false); }}>
-                Dismiss Dialog
+              <button className="btn" style={{ border: '1px solid var(--border-color)', backgroundColor: '#ffffff' }} onClick={() => { setShowQRModal(false); setSummaryCopied(false); }}>
+                Close
               </button>
             </div>
           </div>

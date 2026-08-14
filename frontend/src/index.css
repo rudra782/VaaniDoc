@@ -1268,6 +1268,11 @@ body {
 .handout-card > p { margin: .9rem 0 0; color: #2d514c; font-size: .93rem; line-height: 1.75; white-space: pre-wrap; }
 .handout-actions { display: flex; justify-content: flex-end; gap: .55rem; margin-top: .85rem; }
 .handout-actions .btn { width: auto; padding: .55rem .8rem; font-size: .76rem; }
+.handout-qr { display: block; width: 210px; height: 210px; max-width: 100%; }
+.qr-frame { max-width: 100%; }
+.qr-consult-id { margin: -.6rem 0 1rem; color: #607a76; font-size: .76rem; }
+.qr-consult-id strong { color: #294d48; font-family: var(--font-mono); }
+.qr-error { max-width: 240px; padding: 1rem; color: #9f2923; font-size: .78rem; line-height: 1.5; }
 
 @media (max-width: 680px) {
   .copilot-workspace-heading { align-items: stretch; flex-direction: column; padding-bottom: 0; }
