@@ -2,733 +2,238 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const OLLAMA_BASE_URL = (
-  process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434"
-).replace(/\/$/, "");
-// llama3.2:3b is the most reliable installed option for a modest clinic PC.
-// Set OLLAMA_MODEL=gemma3:4b on a machine with enough RAM for richer multilingual output.
+const PROVIDER = (process.env.AI_PROVIDER || "auto").toLowerCase();
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL?.replace(/\/$/, "");
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:3b";
-console.log(`Local Ollama clinical analysis enabled (model: ${OLLAMA_MODEL}).`);
 
-// Define response schema for structured output
-const intakeSchema = {
-  type: "OBJECT",
-  properties: {
-    patientName: { type: "STRING" },
-    age: { type: "STRING" },
-    gender: { type: "STRING" },
-    languageSpoken: { type: "STRING" },
-    originalSymptomsText: { type: "STRING" },
-    translatedSymptomsText: { type: "STRING" },
-    chiefComplaint: { type: "STRING" },
-    clinicalSummary: { type: "STRING" },
-    duration: { type: "STRING" },
-    severity: {
-      type: "STRING",
-      description: "Severity level of symptoms: Low, Medium, High, or Severe",
-    },
-    associatedSymptoms: {
-      type: "ARRAY",
-      items: { type: "STRING" },
-      description: "List of other symptoms mentioned",
-    },
-    symptomCategories: {
-      type: "ARRAY",
-      items: { type: "STRING" },
-      description:
-        "Clinical domains, e.g., Cardiovascular, Respiratory, Gastrointestinal, Neurological, Musculoskeletal, etc.",
-    },
-    urgencyClassification: {
-      type: "STRING",
-      description: "Urgency category: Low, Medium, High, or Emergency",
-    },
-    urgencyReason: {
-      type: "STRING",
-      description: "Brief justification for the urgency classification",
-    },
-    suggestedSpecialist: {
-      type: "STRING",
-      description:
-        "Recommended medical department or specialist, e.g., General Physician, Cardiologist, Pulmonologist, etc.",
-    },
-    smartQuestions: {
-      type: "ARRAY",
-      items: { type: "STRING" },
-      description:
-        "3 specific clinical diagnostic follow-up questions for the doctor to ask the patient next, based on their symptoms.",
-    },
-    treatmentDraft: {
-      type: "STRING",
-      description:
-        "A draft clinical care plan detailing rest, fluid guidelines, precautions, and standard safety-net instructions (emergency thresholds). Do not specify Rx medications.",
-    },
-    redFlags: {
-      type: "ARRAY",
-      items: { type: "STRING" },
-      description: "Only warning signs supported by the patient's reported symptoms; empty when none are detected.",
-    },
-    patientFriendlySummary: {
-      type: "STRING",
-      description:
-        "A simple, empathetic explanation of the triage results, written directly in the patient's languageSpoken (e.g. Hindi, Tamil, Bengali) using simple layperson terms.",
-    },
-  },
-  required: [
-    "patientName",
-    "age",
-    "gender",
-    "languageSpoken",
-    "originalSymptomsText",
-    "translatedSymptomsText",
-    "chiefComplaint",
-    "clinicalSummary",
-    "duration",
-    "severity",
-    "associatedSymptoms",
-    "symptomCategories",
-    "urgencyClassification",
-    "urgencyReason",
-    "suggestedSpecialist",
-    "smartQuestions",
-    "treatmentDraft",
-    "redFlags",
-    "patientFriendlySummary",
-  ],
-};
-
-// Mock generator for development & offline/fallback scenario
-const FAST_PATH_KEYWORDS = [
-  "fever",
-  "bukhhar",
-  "buxar",
-  "ज्वर",
-  "बुखार",
-  "ताप",
-  "ज्वर",
-  "cough",
-  "khansi",
-  "खाँसी",
-  "खांसी",
-  "কাশি",
-  "దగ్గు",
-  "இருமல்",
-  "pain",
-  "dard",
-  "दर्द",
-  "வலி",
-  "నొప్పి",
-  "ব্যথা",
-  "दुखणे",
-  "breath",
-  "saans",
-  "सांस",
-  "শ্বাস",
-  "శ్వాస",
-  "மூச்சு",
-  "vomit",
-  "ulti",
-  "उल्टी",
-  "வாந்தி",
-  "వాంతులు",
-  "বমি",
-  "diarrhea",
-  "dast",
-  "दस्त",
-  "வயிற்றுப்போக்கு",
-  "విరేచనాలు",
-  "rash",
-  "khujli",
-  "खुजली",
-  "அரிப்பு",
-  "దురద",
-  "চুলকানি",
-  "headache",
-  "sir dard",
-  "सिर दर्द",
-  "தலைவலி",
-  "తలనొప్పి",
-  "fracture",
-  "broken",
-  "टूटा",
-  "முறிவு",
-  "విరిగిన",
-  "ভাঙা",
-  "stroke",
-  "lacwa",
-  "लकवा",
-  "பக்கவாதம்",
-  "పక్షవాతం",
-  "weakness",
-  "kamjori",
-  "कमजोरी",
-  "பலவீனம்",
-  "బలహీనత",
-  "injury",
-  "knee",
-  "joint",
-  "hurt",
-  "chot",
-  "चोट",
-  "காயம்",
-  "గాయం",
-  "আঘাত",
-  "bleeding",
-  "raktasrava",
-  "रक्तस्त्राव",
-  "இரத்தம்",
-  "రక్తస్రావం",
-  "dizziness",
-  "chakkar",
-  "चक्कर",
-  "தலைசுற்றல்",
-  "తలనొప్పి",
-  "nausea",
-  "ghabrahat",
-  "मतली",
-  "உணர்வு",
-  "వికారం",
-  "swelling",
-  "swell",
-  "सूजन",
-  "வீக்கம்",
-  "వాపు",
-  "ফোলা",
+const CATEGORY_PATTERNS = [
+  ["Cardiovascular", /\b(chest|heart|palpitation)/i],
+  ["Respiratory", /\b(cough|breath|breathing|wheez)/i],
+  ["Gastrointestinal", /\b(stomach|abdom|vomit|nausea|diarrh|constipat)/i],
+  ["Neurological", /\b(headache|dizz|seizure|weakness|slurred speech|paralysis)/i],
+  ["Dermatological", /\b(rash|itch|skin|hives)/i],
+  ["Musculoskeletal", /\b(back|leg|knee|joint|muscle|bone|hurt|injur|sprain)/i],
+  ["Urinary", /\b(urinat|urine|bladder|burning.*(?:pee|urin)|pain.*(?:pee|urin))/i],
+  ["Ophthalmological", /\b(eye|vision)/i],
+  ["ENT", /\b(ear|hearing|nose|throat)/i],
 ];
 
-function shouldUseFastLocalPath(text = "") {
-  const lowerText = String(text || "").toLowerCase();
-  if (!lowerText.trim()) return false;
+const SYMPTOM_PATTERNS = [
+  ["Cough", /\bcough(?:ing)?\b/i], ["Fever", /\bfever(?:ish)?\b/i],
+  ["Vomiting", /\bvomit(?:ed|ing|s)?\b/i], ["Nausea", /\bnausea(?:ted)?\b/i],
+  ["Diarrhea", /\bdiarrh(?:ea|oea)\b/i], ["Dizziness", /\b(?:dizz(?:y|iness)|lightheaded)\b/i],
+  ["Itching", /\bitch(?:ing|y)?\b/i], ["Rash", /\brash\b/i],
+  ["Weakness", /\bweakness\b/i], ["Slurred speech", /\bslurred speech\b/i],
+  ["Shortness of breath", /\b(?:shortness of breath|difficulty breathing|unable to breathe|breathless)\b/i],
+  ["Bleeding", /\b(?:bleeding|blood loss|bleeding heavily|heavy bleeding)\b/i],
+  ["Seizure", /\bseizure|convulsion\b/i], ["Pain", /\b(?:pain|hurts?|ache)\b/i],
+  ["Eye redness", /\b(?:red eye|eye is red)\b/i],
+];
 
-  const hasClinicalKeyword = FAST_PATH_KEYWORDS.some((keyword) =>
-    lowerText.includes(keyword.toLowerCase()),
-  );
-  const wordCount = lowerText.trim().split(/\s+/).length;
-
-  return hasClinicalKeyword || wordCount <= 20;
+export function extractDuration(text = "") {
+  return text.match(/\b(?:for|since)\s+((?:about\s+)?(?:\d+|a|an|one|two|three|four|five|six|seven|few|several)\s*(?:minutes?|hours?|days?|weeks?|months?|years?)|(?:today|yesterday|last night|this morning))\b/i)?.[1] || "Not specified";
 }
 
-const GENERIC_SPECIALISTS = new Set([
-  "",
-  "general consultation",
-  "general physician",
-  "general practitioner",
-  "general medicine",
-  "not specified",
-  "unknown",
-]);
+export function extractExplicitSeverity(text = "") {
+  const match = text.match(/\b(unbearable|excruciating|severe|moderate|mild)\b/i)?.[1]?.toLowerCase();
+  return ({ unbearable: "Severe", excruciating: "Severe", severe: "Severe", moderate: "Medium", mild: "Low" })[match] || "Not specified";
+}
 
-export function resolveSuggestedSpecialist(analysis = {}, symptomText = "") {
-  const urgency = String(
-    analysis.urgencyClassification ?? analysis.urgency ?? "",
-  ).toLowerCase();
-  if (urgency === "emergency") return "Emergency Medicine";
+export function extractExplicitSymptoms(text = "") {
+  return SYMPTOM_PATTERNS.filter(([, pattern]) => pattern.test(text)).map(([name]) => name);
+}
 
-  const supplied = String(
-    analysis.suggestedSpecialist ?? analysis.suggested_specialist ?? "",
-  ).trim();
-  if (supplied && !GENERIC_SPECIALISTS.has(supplied.toLowerCase())) {
-    return supplied;
-  }
-
-  const categories = Array.isArray(analysis.symptomCategories)
-    ? analysis.symptomCategories
-    : Array.isArray(analysis.symptom_categories)
-      ? analysis.symptom_categories
-      : [analysis.possible_category];
-  const routingText = [
-    symptomText,
-    analysis.chiefComplaint,
-    analysis.chief_complaint,
-    analysis.translatedSymptomsText,
-    ...categories,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  const routes = [
-    [/chest|cardiac|cardiovascular|heart|सीना|छाती/, "Cardiology"],
-    [/breath|dyspnea|respirat|pulmon|asthma|सांस/, "Pulmonology"],
-    [
-      /stroke|seizure|neurolog|paralysis|severe headache|sudden weakness|one-sided weakness|लकवा/,
-      "Neurology",
-    ],
-    [
-      /abdom|stomach|gastro|vomit|diarrh|पेट|उल्टी|दस्त/,
-      "Gastroenterology",
-    ],
-    [/skin|dermat|rash|itch|खुजली/, "Dermatology"],
-    [/bone|joint|knee|musculoskel|orthop|fracture|injury/, "Orthopedics"],
-    [/eye|ophthalm|vision/, "Ophthalmology"],
-    [/\bent\b|ear|nose|throat|otolaryng/, "ENT / Otolaryngology"],
-    [/kidney|renal|nephro/, "Nephrology"],
-    [/urinary|urine|bladder|urolog/, "Urology"],
+export function detectExplicitRedFlags(text = "") {
+  const flags = [];
+  const rules = [
+    [/\b(?:unable to breathe|severe (?:difficulty breathing|shortness of breath)|cannot breathe)\b/i, "Severe breathing difficulty"],
+    [/\b(?:unconscious|unresponsive|lost consciousness)\b/i, "Loss of consciousness"],
+    [/\b(?:seizure|convulsion)\b/i, "Seizure"],
+    [/\b(?:heavy bleeding|bleeding heavily|major bleeding|severe blood loss)\b/i, "Major bleeding"],
+    [/\b(?:blood in (?:my |the )?vomit|vomit(?:ed|ing)? blood|bloody vomit|haematemesis|hematemesis)\b/i, "Blood in vomit"],
+    [/(?=.*\b(?:weakness|weak)\b)(?=.*\b(?:one-sided|left side|right side)\b)(?=.*\b(?:slurred speech|speech difficulty)\b)/i, "Sudden one-sided weakness with speech difficulty"],
+    [/\b(?:vomit\w*|throwing up)\b[^.]*\b(?:cannot|can't|unable to) keep (?:water|fluids?|anything) down\b|\b(?:cannot|can't|unable to) keep (?:water|fluids?|anything) down\b[^.]*\bvomit/i, "Repeated vomiting with inability to retain fluids"],
+    [/\bsevere chest (?:pain|pressure)\b[^.]*\b(?:sweat|radiat|left arm|jaw|faint|difficulty breathing)\b/i, "Severe chest symptoms with a high-risk associated feature"],
+    [/\b(?:unbearable|excruciating|severe uncontrolled) pain\b/i, "Severe uncontrolled pain"],
   ];
-  return (
-    routes.find(([pattern]) => pattern.test(routingText))?.[1] ||
-    "General Medicine"
-  );
+  for (const [pattern, label] of rules) if (pattern.test(text)) flags.push(label);
+  return flags;
 }
 
-function getQuickLocalAnalysis(text, language, patientDetails) {
-  const lowerText = text.toLowerCase();
+export function inferBroadCategory(text = "") {
+  return CATEGORY_PATTERNS.find(([, pattern]) => pattern.test(text))?.[0] || "General/nonspecific";
+}
 
-  if (!lowerText.trim()) {
-    return {
-      patientName: patientDetails.name || "Anonymous",
-      age: patientDetails.age || "Unknown",
-      gender: patientDetails.gender || "Unknown",
-      languageSpoken: language,
-      originalSymptomsText: text,
-      translatedSymptomsText: text,
-      chiefComplaint: "General consultation",
-      clinicalSummary:
-        "Minimal symptom detail supplied. Clinical review recommended.",
-      duration: "Not specified",
-      severity: "Medium",
-      associatedSymptoms: [],
-      symptomCategories: ["General Medicine"],
-      urgencyClassification: "Medium",
-      urgencyReason:
-        "The symptom description is brief and needs clinician review.",
-      suggestedSpecialist: "General Physician",
-      smartQuestions: [
-        "When did the symptoms begin?",
-        "Have you had similar symptoms before?",
-        "Does anything make this better or worse?",
-      ],
-      treatmentDraft:
-        "Rest, stay hydrated, and seek prompt clinical review if symptoms worsen.",
-      patientFriendlySummary:
-        "Please rest and drink fluids while a clinician reviews your symptoms.",
-      confidence: 0.58,
-    };
-  }
+export function inferRoutingFromCategory(category, urgency) {
+  if (urgency === "Emergency") return "Emergency Medicine";
+  return ({ Cardiovascular: "Cardiology", Respiratory: "Pulmonology", Gastrointestinal: "Gastroenterology", Neurological: "Neurology", Dermatological: "Dermatology", Musculoskeletal: "Orthopedics", Urinary: "Urology", Ophthalmological: "Ophthalmology", ENT: "ENT / Otolaryngology" })[category] || "General Medicine";
+}
 
-  const hasClinicalSignal = FAST_PATH_KEYWORDS.some((keyword) =>
-    lowerText.includes(keyword.toLowerCase()),
-  );
+function complaintFor(text, category) {
+  if (/\b(stomach|abdominal?) pain\b/i.test(text)) return "Abdominal pain";
+  if (/\bheadache\b/i.test(text)) return "Headache";
+  if (/\bear pain\b/i.test(text)) return "Ear pain";
+  if (/\bback pain\b/i.test(text)) return "Back pain";
+  if (/\bpain.*urin|urin.*pain/i.test(text)) return "Pain with urination";
+  const explicit = extractExplicitSymptoms(text).filter((s) => s !== "Pain");
+  return explicit[0] || (category === "General/nonspecific" ? "Reported symptom" : `Reported ${category.toLowerCase()} symptom`);
+}
 
-  if (!hasClinicalSignal) {
-    return getQuickLocalAnalysis("", language, patientDetails);
-  }
+function genericQuestions(category) {
+  const focus = ({ Gastrointestinal: "Where exactly is the symptom or pain located?", Musculoskeletal: "Where exactly does it hurt, and was there an injury?", Dermatological: "Where is the itching or skin change, and what does it look like?", Neurological: "Is the symptom sudden, and are there any changes in strength, speech, vision, or balance?", Respiratory: "Is breathing affected, and is the cough dry or producing mucus?", Urinary: "Is there burning, blood, fever, or a change in urine frequency?", Ophthalmological: "Is there eye pain, discharge, injury, or any change in vision?", ENT: "Is there discharge, hearing change, fever, or a recent infection?" })[category] || "Where exactly do you feel the symptom?";
+  return [focus, "When did it start, and how severe is it?", "Are there any other symptoms or warning signs you have noticed?"];
+}
 
-  const defaultResult = getMockAnalysis(text, language, patientDetails);
+function missingClinicalInformation(duration, severity, patientDetails = {}) {
+  return [
+    duration === "Not specified" && "Symptom onset and duration",
+    severity === "Not specified" && "Symptom severity and effect on normal activities",
+    "Exact location, pattern, triggers, and relieving factors",
+    "Associated symptoms and relevant warning signs",
+    !patientDetails.age && "Age",
+    patientDetails.pregnancyStatus == null && "Pregnancy status, when relevant",
+    !patientDetails.allergies && "Medication and other allergies",
+    !patientDetails.currentMedications && "Current medications and possible interactions",
+    !patientDetails.chronicDiseases && "Relevant chronic diseases",
+    !patientDetails.kidneyLiverDisease && "Kidney or liver disease history",
+  ].filter(Boolean);
+}
+
+function genericSupport(category, emergency) {
+  if (emergency) return {
+    next: ["Arrange immediate emergency assessment based on the explicitly reported warning sign.", "Confirm vital signs and perform a focused clinician examination without delaying escalation."],
+    selfCare: ["Keep the patient safe and at rest while emergency care is arranged."],
+    precautions: ["Do not drive or remain alone while awaiting urgent assessment.", "Do not delay emergency care to try home treatment."],
+    followUp: ["Follow the emergency team's discharge and reassessment plan after acute evaluation."],
+  };
+  const focus = ({
+    Gastrointestinal: "abdominal location, tenderness, meals, bowel and urinary features",
+    Respiratory: "breathing effort, oxygenation if available, and cough characteristics",
+    Neurological: "neurological function, gait, vision, speech, and symptom onset",
+    Dermatological: "distribution and appearance of the affected skin",
+    Musculoskeletal: "movement, tenderness, function, and any injury mechanism",
+    Urinary: "hydration, urine pattern, abdominal or flank tenderness",
+    Ophthalmological: "visual acuity, eye pain, discharge, and injury or chemical exposure",
+    ENT: "the affected ear, hearing, discharge, and surrounding tenderness",
+  })[category] || "the reported symptom and relevant vital signs";
+  const support = ({
+    Gastrointestinal: "Take fluids normally if comfortable and note whether meals or bowel movements change the symptom.",
+    Respiratory: "Rest, avoid smoke or fumes, and monitor whether breathing or cough worsens.",
+    Neurological: "Rest in a safe place and avoid driving while dizziness, weakness, or balance symptoms are present.",
+    Dermatological: "Avoid scratching and any newly introduced skin product until the area is reviewed.",
+    Musculoskeletal: "Reduce activities that worsen the pain and support the affected area comfortably.",
+    Urinary: "Maintain normal hydration unless a clinician has restricted fluids, and note urine frequency or appearance.",
+    Ophthalmological: "Avoid rubbing the eye or using another person's eye drops.",
+    ENT: "Keep the ear dry and do not insert objects or unreviewed drops into it.",
+  })[category] || "Rest as needed and monitor how the reported symptom changes.";
   return {
-    ...defaultResult,
-    confidence: calculateExtractionConfidence(text, defaultResult),
+    next: [`Complete the missing history, then perform a focused examination of ${focus}.`, "Consider investigations only if the completed history or examination identifies a clinical indication."],
+    selfCare: [support],
+    precautions: ["Do not start unreviewed medication while allergy, interaction, pregnancy, kidney, and liver safety information is incomplete.", "Seek earlier review if the symptom becomes severe or a new warning sign appears."],
+    followUp: ["Arrange clinician follow-up after the missing history is obtained; timing should be brought forward if symptoms persist or worsen."],
   };
 }
 
-function getMockAnalysis(text, language, patientDetails) {
-  const lowerText = text.toLowerCase();
-
-  let translatedText = `Patient reports: "${text}" in ${language}.`;
-  let chiefComplaint = "General consultation";
-  let duration = "Unknown";
-  let severity = "Medium";
-  let urgency = "Medium";
-  let reason = "Further examination required.";
-  let specialist = "General Physician";
-  let categories = ["General Medicine"];
-  let associated = [];
-  let questions = [
-    "When did this start?",
-    "Have you had similar symptoms in the past?",
-    "Does anything make it better or worse?",
-  ];
-  let treatment =
-    "Ensure adequate rest and oral rehydration. Monitor vitals and consult a general practitioner if symptoms persist.";
-  let patientSummary = language.startsWith("Hindi")
-    ? "कृपया आराम करें और पर्याप्त पानी पीएं। यदि लक्षण बने रहते हैं तो डॉक्टर से संपर्क करें।"
-    : "Please rest and drink plenty of fluids. Consult a medical professional if your symptoms worsen.";
-  let redFlags = [];
-
-  // Very basic heuristic for standard symptoms in Hindi/English
-  if (
-    lowerText.includes("chest") ||
-    lowerText.includes("सीना") ||
-    (lowerText.includes("दर्द") &&
-      (lowerText.includes("छाती") || lowerText.includes("दिल")))
-  ) {
-    translatedText = text;
-    chiefComplaint = "Chest Pain / Suspected Cardiac Event";
-    duration = extractDuration(text);
-    severity = "Severe";
-    urgency = "Emergency";
-    reason =
-      "Acute chest pain with radiation risks cardiac arrest or myocardial infarction.";
-    specialist = "Cardiologist";
-    categories = ["Cardiovascular"];
-    associated = [lowerText.includes("arm") ? "Pain radiating to arm" : null, lowerText.includes("sweat") ? "Sweating" : null, lowerText.includes("breath") ? "Shortness of breath" : null].filter(Boolean);
-    redFlags = ["Chest pressure or pain spreading to the arm, jaw, neck, or back"];
-    if (/sweat|faint|breath/.test(lowerText)) redFlags.push("Chest discomfort with sweating, faintness, or severe breathing difficulty");
-    questions = [
-      "Does the chest pain radiate to your neck, back, or jaw?",
-      "Are you experiencing any difficulty breathing or cold sweating?",
-      "Do you have a history of heart conditions or high blood pressure?",
-    ];
-    treatment =
-      "Keep the patient at rest and arrange immediate emergency evaluation and transport. Do not allow the patient to drive; escalate at once if pain persists, breathing worsens, or consciousness changes.";
-    patientSummary = language.startsWith("Hindi")
-      ? "आपातकालीन स्थिति: तुरंत आराम करें और बिना देर किए नजदीकी अस्पताल के आपातकालीन विभाग में जाएं।"
-      : "Emergency warning: Please rest immediately and proceed to the nearest emergency department without delay.";
-  } else if (
-    lowerText.includes("cough") || lowerText.includes("breath") || lowerText.includes("खांसी") || lowerText.includes("सांस")
-  ) {
-    translatedText = text;
-    chiefComplaint = "Cough / Breathing Symptoms";
-    duration = extractDuration(text);
-    severity = lowerText.includes("shortness") || lowerText.includes("difficulty") ? "High" : "Medium";
-    urgency = severity === "High" ? "High" : "Medium";
-    reason = "Cough with reported breathing symptoms needs prompt respiratory assessment.";
-    specialist = "Pulmonology";
-    categories = ["Respiratory", ...(lowerText.includes("fever") ? ["Infectious Diseases"] : [])];
-    associated = [lowerText.includes("fever") ? "Fever" : null, lowerText.includes("shortness") ? "Shortness of breath" : null].filter(Boolean);
-    questions = ["Is the cough dry, or are you bringing up phlegm or blood?", "Are you short of breath at rest, unable to speak full sentences, or having chest pain?", "What was the highest temperature, and have symptoms worsened over the last day?"];
-    treatment = "Rest, take frequent fluids if able, and avoid smoke or strenuous activity while awaiting clinical review. Seek urgent care now if breathing is difficult at rest, lips appear blue, confusion develops, or symptoms rapidly worsen.";
-    redFlags = lowerText.includes("shortness") || lowerText.includes("difficulty breathing") ? ["Shortness of breath that is severe, occurs at rest, or prevents full sentences"] : [];
-  } else if (
-    lowerText.includes("fever") ||
-    lowerText.includes("बुखार") ||
-    lowerText.includes("कफ") ||
-    lowerText.includes("खांसी") ||
-    lowerText.includes("weakness")
-  ) {
-    translatedText = "I have a high fever and a cough for the last three days.";
-    chiefComplaint = "Fever and Cough";
-    duration = "3 days";
-    severity = "Medium";
-    urgency = "Medium";
-    reason = "Persistent fever and cough requires respiratory evaluation.";
-    specialist = "General Physician / Pulmonologist";
-    categories = ["Respiratory", "Infectious Diseases"];
-    associated = ["Body ache", "Weakness"];
-    questions = [
-      "Is the cough dry or productive of phlegm?",
-      "Are you experiencing any shortness of breath or chest discomfort when coughing?",
-      "Have you noticed daily fluctuations in your body temperature?",
-    ];
-    treatment = "Rest and take frequent fluids if able. Arrange clinical review if fever persists or weakness worsens; seek urgent care for confusion, fainting, breathing difficulty, or inability to drink.";
-    questions = ["What was the highest measured temperature and when did the fever start?", "Can you drink and pass urine normally, or are you unusually drowsy or weak?", "Are there localizing symptoms such as cough, pain, rash, vomiting, or urinary burning?"];
-    patientSummary = language.startsWith("Hindi")
-      ? "आपको बुखार और खांसी है। पर्याप्त आराम करें, गुनगुना पानी पिएं और जरूरत पड़ने पर डॉक्टर से संपर्क करें।"
-      : "You have a fever and cough. Take plenty of rest, stay hydrated, and consult a doctor if symptoms persist.";
-    if (!lowerText.includes("cough") && !lowerText.includes("खांसी")) {
-      chiefComplaint = "Fever and general symptoms";
-      specialist = "General Medicine";
-      categories = ["General Medicine"];
-      associated = lowerText.includes("weakness") ? ["Weakness"] : [];
-    }
-  } else if (
-    lowerText.includes("stomach") ||
-    lowerText.includes("पेट") ||
-    lowerText.includes("दस्त") ||
-    lowerText.includes("vomit") ||
-    lowerText.includes("उल्टी")
-  ) {
-    translatedText = text;
-    chiefComplaint = "Abdominal Pain and Vomiting";
-    duration = extractDuration(text);
-    severity = "High";
-    urgency = "High";
-    reason =
-      "Severe abdominal pain with recurrent vomiting risks dehydration and requires acute care.";
-    specialist = "Gastroenterologist";
-    categories = ["Gastrointestinal"];
-    associated = ["Nausea", "Dehydration risk"];
-    redFlags = ["Repeated vomiting with inability to keep fluids down or markedly reduced urination", "Blood in vomit or stool, fainting, or severe/worsening abdominal pain"];
-    questions = [
-      "Where exactly is the pain located in your abdomen?",
-      "Are you able to keep any fluids or water down?",
-      "Have you observed any fever, diarrhea, or blood in your stool or vomit?",
-    ];
-    treatment = "Take frequent small sips of oral rehydration fluid if tolerated and rest. Seek prompt assessment if vomiting continues; seek urgent care for inability to retain fluids, very little urine, fainting, blood, or severe worsening pain.";
-    patientSummary = language.startsWith("Hindi")
-      ? "पेट दर्द और उल्टी के कारण ओ.आर.एस. का घोल धीरे-धीरे पीते रहें। आराम करें और जल्द ही चिकित्सक को दिखाएं।"
-      : "Drink ORS solution slowly to stay hydrated. Rest and consult a physician soon.";
-  } else if (/headache|stroke|paralysis|speech|one-sided|weakness/.test(lowerText)) {
-    translatedText = text; chiefComplaint = "Headache / Neurological Symptoms"; duration = extractDuration(text); severity = /stroke|paralysis|speech|one-sided/.test(lowerText) ? "Severe" : "Medium"; urgency = severity === "Severe" ? "Emergency" : "Medium"; reason = severity === "Severe" ? "Possible sudden focal neurological deficit requires emergency evaluation." : "Headache requires assessment for severity and neurological warning signs."; specialist = severity === "Severe" ? "Emergency Medicine" : "Neurology"; categories = ["Neurological"]; associated = /weakness/.test(lowerText) ? ["Weakness"] : []; questions = ["Did the headache begin suddenly, and is it the worst headache you have experienced?", "Is there new weakness, facial droop, speech difficulty, confusion, seizure, or vision loss?", "Have you had fever, neck stiffness, head injury, or repeated vomiting?"]; treatment = "Rest in a safe quiet place while arranging clinical review. Call emergency services immediately for sudden weakness, facial droop, speech difficulty, seizure, confusion, collapse, or an abrupt severe headache."; redFlags = /stroke|paralysis|speech|one-sided/.test(lowerText) ? ["New weakness or paralysis, facial droop, or speech difficulty consistent with a stroke warning"] : [];
-  } else if (/rash|itch|itchy|खुजली/.test(lowerText)) {
-    translatedText = text; chiefComplaint = "Itchy Rash"; duration = extractDuration(text); severity = "Low"; urgency = "Low"; reason = "Localized itchy rash without a reported systemic warning sign is suitable for routine skin assessment."; specialist = "Dermatology"; categories = ["Dermatological"]; associated = ["Itching", "Redness"]; questions = ["Did you use a new soap, medicine, food, plant, or other product before the rash began?", "Is the rash spreading, blistering, painful, warm, or associated with fever?", "Is there swelling of the lips or tongue, wheezing, or difficulty breathing?"]; treatment = "Avoid suspected new irritants, scratching, and fragranced products; keep the skin clean and cool pending clinical review. Seek emergency help for facial or tongue swelling, wheezing, breathing difficulty, widespread blistering, or faintness."; redFlags = [];
-  } else if (/knee|joint|injury|hurt|football|fracture|swelling/.test(lowerText)) {
-    translatedText = text; chiefComplaint = "Knee / Musculoskeletal Injury"; duration = extractDuration(text); severity = "Medium"; urgency = "Medium"; reason = "An acute joint injury needs examination for stability, circulation, and ability to bear weight."; specialist = "Orthopedics"; categories = ["Musculoskeletal"]; associated = lowerText.includes("swelling") ? ["Swelling"] : []; questions = ["How did the injury happen—twist, direct impact, fall, or collision—and did you hear a pop?", "Can you bear weight and bend or straighten the knee?", "Is there marked swelling, deformity, numbness, or a cold or pale foot?"]; treatment = "Stop sports, protect the knee, rest it, use a wrapped cool pack briefly, and elevate it while awaiting assessment. Seek urgent care for deformity, inability to bear weight, rapidly increasing swelling, numbness, or a cold or pale foot."; redFlags = [];
-  }
-
-  const mockResult = {
-    patientName: patientDetails.name || "Anonymous",
-    age: patientDetails.age || "Unknown",
-    gender: patientDetails.gender || "Unknown",
-    languageSpoken: language,
-    originalSymptomsText: text,
-    translatedSymptomsText: translatedText,
-    chiefComplaint: chiefComplaint,
-    clinicalSummary: `Patient presents with ${chiefComplaint.toLowerCase()} of duration ${duration}. Translated statement: ${translatedText}`,
-    duration: duration,
-    severity: severity,
-    associatedSymptoms: associated,
-    symptomCategories: categories,
+export function createConservativeFallback(text, language = "English", patientDetails = {}) {
+  const category = inferBroadCategory(text);
+  const duration = extractDuration(text);
+  const explicitSeverity = extractExplicitSeverity(text);
+  const redFlags = detectExplicitRedFlags(text);
+  const urgency = redFlags.length ? "Emergency" : explicitSeverity === "Severe" ? "High" : "Low";
+  const complaint = complaintFor(text, category);
+  const symptoms = extractExplicitSymptoms(text).filter((item) => item.toLowerCase() !== complaint.toLowerCase() && item !== "Pain");
+  const missing = missingClinicalInformation(duration, explicitSeverity, patientDetails);
+  const support = genericSupport(category, urgency === "Emergency");
+  return {
+    patientName: patientDetails.name || "Anonymous", age: patientDetails.age || "Unknown", gender: patientDetails.gender || "Unknown",
+    languageSpoken: language, originalSymptomsText: text, translatedSymptomsText: text,
+    chiefComplaint: complaint,
+    clinicalSummary: `Patient reported: ${text.trim().replace(/[.!]+$/, "")}. ${missing.length ? "Important clinical details remain unknown and require clarification." : "No additional findings are inferred."}`,
+    duration, severity: explicitSeverity, associatedSymptoms: symptoms, symptomCategories: [category],
     urgencyClassification: urgency,
-    urgencyReason: reason,
-    suggestedSpecialist: specialist,
-    smartQuestions: questions,
-    treatmentDraft: treatment,
+    urgencyReason: redFlags.length ? `Emergency warning evidence reported: ${redFlags.join("; ")}.` : explicitSeverity === "Severe" ? "Severe symptoms were explicitly reported and need prompt assessment." : "No emergency warning evidence or severe intensity was stated; missing details require follow-up.",
+    possibleCauses: [{ name: `${category === "General/nonspecific" ? "Broad" : category} causes requiring further history`, reasoning: `The reported complaint fits this broad clinical area, but the narration does not contain enough evidence to identify a specific cause. Possible triggers cannot be determined from the current information.`, confidence: "low" }],
+    missingInformation: missing,
+    suggestedSpecialist: inferRoutingFromCategory(category, urgency), smartQuestions: genericQuestions(category),
+    recommendedNextSteps: support.next,
+    selfCareGuidance: support.selfCare,
+    precautions: support.precautions,
+    medicationConsiderations: [],
+    medicationSafetySummary: "Medication cannot yet be responsibly suggested because key clinical and medication-safety information is missing.",
+    followUpGuidance: support.followUp,
+    treatmentDraft: redFlags.length ? "Arrange immediate emergency assessment. Keep the patient safe while awaiting emergency care; further treatment requires clinician evaluation." : "Further clinician assessment is needed before a treatment plan can be drafted. Until reviewed, avoid activities that worsen the reported symptom and seek urgent help if a new severe warning sign develops.",
     redFlags,
-    patientFriendlySummary: patientSummary,
-  };
-
-  mockResult.suggestedSpecialist = resolveSuggestedSpecialist(mockResult, text);
-  if (mockResult.chiefComplaint === "General consultation") {
-    const categoryBySpecialist = {
-      Pulmonology: "Respiratory",
-      Neurology: "Neurological",
-      Gastroenterology: "Gastrointestinal",
-      Dermatology: "Dermatological",
-      Orthopedics: "Musculoskeletal",
-      Ophthalmology: "Ophthalmological",
-      "ENT / Otolaryngology": "ENT",
-      Nephrology: "Renal",
-      Urology: "Urinary",
-    };
-    const routedCategory = categoryBySpecialist[mockResult.suggestedSpecialist];
-    if (routedCategory) {
-      mockResult.symptomCategories = [routedCategory];
-      mockResult.chiefComplaint = `Reported ${routedCategory} symptoms`;
-      mockResult.clinicalSummary = `Patient reports symptoms requiring ${routedCategory.toLowerCase()} evaluation. Narrative: ${text}`;
-    }
-  }
-
-  return {
-    ...mockResult,
-    confidence: calculateExtractionConfidence(text, mockResult),
+    patientFriendlySummary: redFlags.length ? `You reported: ${text.trim()} This includes a warning sign that needs immediate emergency assessment.` : `You reported: ${text.trim()} A clinician should ask for the missing details before recommending treatment.`,
+    analysisProvider: "generic-fallback",
   };
 }
 
-function extractDuration(text) {
-  return String(text).match(/(?:for|since)\s+([^,.]+)/i)?.[1]?.trim() || "Not specified";
+const SYSTEM_PROMPT = `You are VaaniDoc, a supervised clinical intake assistant. Return only JSON with these exact keys: translatedSymptomsText, chiefComplaint, clinicalSummary, duration, severity, associatedSymptoms, symptomCategories, urgencyClassification, urgencyReason, suggestedSpecialist, possibleCauses, missingInformation, smartQuestions, recommendedNextSteps, selfCareGuidance, precautions, medicationConsiderations, medicationSafetySummary, followUpGuidance, treatmentDraft, redFlags, patientFriendlySummary.
+
+Use only facts stated or clearly implied by the patient's narration.
+Do not add symptoms, duration, severity, associated findings, or red flags that were not mentioned.
+If information is missing, mark it unknown/not specified and ask about it in smartQuestions.
+
+possibleCauses is an array of {name, reasoning, confidence}, with confidence low, moderate, or higher. These are differential considerations, never confirmed diagnoses; every reason must identify the narration evidence and uncertainty. If triggers are not narrated, explicitly say they cannot be determined. missingInformation, recommendedNextSteps, selfCareGuidance, precautions, and followUpGuidance are arrays of strings. medicationConsiderations is an array of {nameOrClass, purpose, conditionsForUse, safetyNotes}. Leave it empty unless age, pregnancy status, allergies, current medicines/interactions, chronic disease, kidney/liver safety, severity, and red flags have been adequately considered. medicationSafetySummary must explain why options are or are not responsible for clinician review. Never provide prescription-only dosing, antibiotics without evidence, controlled drugs, or definitive instructions. State missing medication-safety facts in missingInformation and confirm them in next steps.
+
+Do not diagnose or prescribe. redFlags lists only warning signs actually present, never hypothetical risks. Questions may ask about absent information. Use Low, Medium, High, or Emergency for urgency; a symptom name alone is not an emergency. Treatment is conservative decision support and must say assessment is needed when detail is insufficient. Make advice specific to the current narration rather than using a universal self-care block.`;
+
+async function callGemini(user) {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system_instruction: { parts: [{ text: SYSTEM_PROMPT }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig: { responseMimeType: "application/json", temperature: 0.1 } }) });
+  if (!response.ok) throw new Error(`Gemini returned ${response.status}`);
+  const payload = await response.json();
+  return JSON.parse(payload.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
 }
 
-export function calculateExtractionConfidence(text, analysis = {}) {
-  const rawText = String(text || "").trim();
-  const lowerText = rawText.toLowerCase();
-
-  if (!rawText) return 0.38;
-
-  let score = 0.42;
-
-  const strongSignals = [
-    "chest pain",
-    "shortness of breath",
-    "breathlessness",
-    "difficulty breathing",
-    "fever",
-    "cough",
-    "abdominal pain",
-    "vomiting",
-    "diarrhea",
-    "rash",
-    "headache",
-    "bleeding",
-    "dizziness",
-    "swelling",
-    "burning",
-    "seizure",
-    "stroke",
-    "injury",
-    "fracture",
-    "weakness",
-    "nausea",
-    "sore throat",
-  ];
-
-  const matchedSignals = strongSignals.filter((signal) =>
-    lowerText.includes(signal),
-  ).length;
-  score += Math.min(matchedSignals * 0.09, 0.27);
-
-  if (
-    analysis.chiefComplaint &&
-    analysis.chiefComplaint !== "General consultation"
-  ) {
-    score += 0.12;
-  }
-
-  if (
-    Array.isArray(analysis.associatedSymptoms) &&
-    analysis.associatedSymptoms.length > 0
-  ) {
-    score += Math.min(analysis.associatedSymptoms.length * 0.03, 0.12);
-  }
-
-  if (
-    analysis.duration &&
-    !["unknown", "not specified"].includes(
-      String(analysis.duration).trim().toLowerCase(),
-    )
-  ) {
-    score += 0.08;
-  }
-
-  if (
-    analysis.severity &&
-    ["Low", "Medium", "High", "Severe"].includes(analysis.severity)
-  ) {
-    score += 0.06;
-  }
-
-  if (
-    analysis.urgencyClassification &&
-    ["Low", "Medium", "High", "Emergency"].includes(
-      analysis.urgencyClassification,
-    )
-  ) {
-    score += 0.06;
-  }
-
-  if (
-    Array.isArray(analysis.symptomCategories) &&
-    analysis.symptomCategories.length > 0
-  ) {
-    score += 0.05;
-  }
-
-  const vaguePatterns = [
-    "not feeling well",
-    "feeling unwell",
-    "not good",
-    "issue",
-    "problem",
-    "something wrong",
-  ];
-  const isVague =
-    vaguePatterns.some((pattern) => lowerText.includes(pattern)) ||
-    rawText.split(/\s+/).length < 6;
-  if (isVague) {
-    score -= 0.18;
-  }
-
-  if (rawText.length > 120) {
-    score += 0.04;
-  }
-
-  if (
-    analysis.urgencyClassification === "Emergency" ||
-    lowerText.includes("chest pain") ||
-    lowerText.includes("difficulty breathing")
-  ) {
-    score += 0.05;
-  }
-
-  return Number(Math.max(0.32, Math.min(0.97, score)).toFixed(2));
+async function callOllama(user) {
+  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: OLLAMA_MODEL, stream: false, format: "json", options: { temperature: 0.1 }, messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: user }] }) });
+  if (!response.ok) throw new Error(`Ollama returned ${response.status}`);
+  return JSON.parse((await response.json()).message?.content || "{}");
 }
 
-function normalizeAnalysis(result, text, language, patientDetails) {
-  const urgency = ["Low", "Medium", "High", "Emergency"].includes(
-    result.urgencyClassification,
-  )
-    ? result.urgencyClassification
-    : "Medium";
-  const severity = ["Low", "Medium", "High", "Severe"].includes(result.severity)
-    ? result.severity
-    : "Medium";
-  const fallback = getMockAnalysis(text, language, patientDetails);
-  const defaultQuestions = fallback.smartQuestions;
-  const smartQuestions = Array.isArray(result.smartQuestions)
-    ? result.smartQuestions.slice(0, 3).map(String)
-    : [];
-  while (smartQuestions.length < 3)
-    smartQuestions.push(defaultQuestions[smartQuestions.length]);
-
-  const normalized = {
-    patientName: patientDetails.name || "Anonymous",
-    age: patientDetails.age || "Unknown",
-    gender: patientDetails.gender || "Unknown",
-    languageSpoken: language,
-    originalSymptomsText: text,
-    translatedSymptomsText: String(result.translatedSymptomsText || text),
-    chiefComplaint: String(result.chiefComplaint || "General consultation"),
-    clinicalSummary: String(
-      result.clinicalSummary || "Clinical review recommended.",
-    ),
-    duration: String(result.duration || "Not specified"),
-    severity,
-    associatedSymptoms: Array.isArray(result.associatedSymptoms)
-      ? result.associatedSymptoms.slice(0, 8).map(String)
-      : [],
-    symptomCategories: Array.isArray(result.symptomCategories)
-      ? result.symptomCategories.slice(0, 5).map(String)
-      : ["General Medicine"],
-    urgencyClassification: urgency,
-    urgencyReason: String(
-      result.urgencyReason || "Clinical review is recommended.",
-    ),
-    suggestedSpecialist: resolveSuggestedSpecialist(result, text),
-    smartQuestions,
-    treatmentDraft: String(
-      result.treatmentDraft || fallback.treatmentDraft,
-    ),
-    redFlags: Array.isArray(result.redFlags) ? result.redFlags.slice(0, 8).map(String) : fallback.redFlags,
-    patientFriendlySummary: String(
-      result.patientFriendlySummary ||
-        "Please consult the clinic team for the next steps.",
-    ),
-  };
-
-  return {
-    ...normalized,
-    confidence: calculateExtractionConfidence(text, normalized),
+function normalizeAI(result, fallback, provider) {
+  const strings = (value, fallbackValue) => Array.isArray(value) ? value.slice(0, 8).map(String) : fallbackValue;
+  const possibleCauses = Array.isArray(result.possibleCauses) ? result.possibleCauses.slice(0, 5).filter((cause) => cause && cause.name && cause.reasoning).map((cause) => ({ name: String(cause.name), reasoning: String(cause.reasoning), confidence: ["low", "moderate", "higher"].includes(String(cause.confidence).toLowerCase()) ? String(cause.confidence).toLowerCase() : "low" })) : fallback.possibleCauses;
+  const hasMedicationSafetyContext = !fallback.missingInformation.some((item) => /age|pregnan|allerg|medication|interaction|chronic|kidney|liver/i.test(item));
+  return { ...fallback, ...result,
+    patientName: fallback.patientName, age: fallback.age, gender: fallback.gender, languageSpoken: fallback.languageSpoken, originalSymptomsText: fallback.originalSymptomsText,
+    duration: fallback.duration, severity: fallback.severity,
+    associatedSymptoms: fallback.associatedSymptoms, redFlags: fallback.redFlags,
+    urgencyClassification: fallback.urgencyClassification,
+    possibleCauses,
+    missingInformation: [...new Set([...fallback.missingInformation, ...strings(result.missingInformation, [])])],
+    smartQuestions: Array.isArray(result.smartQuestions) && result.smartQuestions.length >= 3 ? result.smartQuestions.slice(0, 3).map(String) : fallback.smartQuestions,
+    recommendedNextSteps: strings(result.recommendedNextSteps, fallback.recommendedNextSteps),
+    selfCareGuidance: strings(result.selfCareGuidance, fallback.selfCareGuidance),
+    precautions: strings(result.precautions, fallback.precautions),
+    medicationConsiderations: hasMedicationSafetyContext && Array.isArray(result.medicationConsiderations) ? result.medicationConsiderations.slice(0, 4) : [],
+    medicationSafetySummary: hasMedicationSafetyContext ? String(result.medicationSafetySummary || fallback.medicationSafetySummary) : fallback.medicationSafetySummary,
+    followUpGuidance: strings(result.followUpGuidance, fallback.followUpGuidance),
+    suggestedSpecialist: inferRoutingFromCategory(result.symptomCategories?.[0] || fallback.symptomCategories[0], fallback.urgencyClassification),
+    analysisProvider: provider,
   };
 }
 
 export async function analyzeSymptoms(text, language, patientDetails = {}) {
-  if (!text || text.trim() === "")
-    throw new Error("Symptom description cannot be empty.");
-
-  const system = `You are VaaniDoc, a clinical intake and safety-triage assistant for supervised rural clinics in India. You do not diagnose, prescribe medicines, recommend procedures, administer treatments, or invent facts. Translate regional Indian languages and transliterated Hinglish into concise clinical English. Escalate Emergency for time-critical red flags such as chest pain with sweating/radiation, stroke signs, severe breathing difficulty, major bleeding, seizures, or altered consciousness. Return only valid JSON with these exact keys: translatedSymptomsText, chiefComplaint, clinicalSummary, duration, severity, associatedSymptoms, symptomCategories, urgencyClassification, urgencyReason, suggestedSpecialist, smartQuestions, treatmentDraft, redFlags, patientFriendlySummary. Every clinical field must be specific to the supplied narration. redFlags must contain only warning signs supported by the narration (or be empty). suggestedSpecialist is routing guidance, not a diagnosis: choose the most appropriate department from the analyzed symptoms and category, and use Emergency Medicine when red flags require emergency routing. severity must be Low, Medium, High, or Severe. urgencyClassification must be Low, Medium, High, or Emergency. smartQuestions must contain exactly 3 symptom-specific questions. treatmentDraft must only say patient-specific supportive non-pharmacological measures and clear escalation instructions; never name medicines, oxygen, procedures, tests, or definitive treatments.`;
-  const user = JSON.stringify({
-    patientLanguage: language,
-    demographics: {
-      age: patientDetails.age || "Unknown",
-      gender: patientDetails.gender || "Unknown",
-    },
-    narration: text,
-  });
-
-  if (shouldUseFastLocalPath(text)) {
-    return getQuickLocalAnalysis(text, language, patientDetails);
-  }
-
+  if (!text?.trim()) throw new Error("Symptom description cannot be empty.");
+  const fallback = createConservativeFallback(text, language, patientDetails);
+  const user = JSON.stringify({ patientLanguage: language, demographics: patientDetails, narration: text });
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        stream: false,
-        format: "json",
-        options: { temperature: 0.1, num_predict: 900 },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      }),
-    });
-    clearTimeout(timeout);
-    if (!response.ok)
-      throw new Error(
-        `Ollama returned ${response.status}: ${await response.text()}`,
-      );
-    const payload = await response.json();
-    const parsed = JSON.parse(payload?.message?.content || "{}");
-    return normalizeAnalysis(parsed, text, language, patientDetails);
+    if ((PROVIDER === "auto" || PROVIDER === "gemini") && process.env.GEMINI_API_KEY) return normalizeAI(await callGemini(user), fallback, "gemini");
+    if ((PROVIDER === "ollama" || (PROVIDER === "auto" && OLLAMA_BASE_URL)) && OLLAMA_BASE_URL) return normalizeAI(await callOllama(user), fallback, "ollama");
   } catch (error) {
-    console.error(
-      "Ollama analysis unavailable; using local safety rules:",
-      error.message,
-    );
-    return getMockAnalysis(text, language, patientDetails);
+    console.error(`Configured AI provider unavailable; using conservative fallback: ${error.message}`);
   }
+  return fallback;
+}
+
+export function resolveSuggestedSpecialist(analysis = {}, symptomText = "") {
+  const category = analysis.symptomCategories?.[0] || inferBroadCategory(symptomText);
+  return inferRoutingFromCategory(category, analysis.urgencyClassification);
+}
+
+export function calculateExtractionConfidence(text, analysis = {}) {
+  const known = [analysis.duration !== "Not specified", analysis.severity !== "Not specified", (analysis.associatedSymptoms?.length || 0) > 0].filter(Boolean).length;
+  return Number(Math.min(0.9, 0.45 + known * 0.12 + Math.min(String(text).split(/\s+/).length, 20) * 0.01).toFixed(2));
 }

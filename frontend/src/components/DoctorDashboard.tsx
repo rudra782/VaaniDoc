@@ -32,6 +32,14 @@ interface IntakeSession {
   treatmentDraft?: string;
   patientFriendlySummary?: string;
   redFlags?: string[];
+  possibleCauses?: { name: string; reasoning: string; confidence: 'low' | 'moderate' | 'higher' }[];
+  missingInformation?: string[];
+  recommendedNextSteps?: string[];
+  selfCareGuidance?: string[];
+  precautions?: string[];
+  medicationConsiderations?: { nameOrClass: string; purpose: string; conditionsForUse: string; safetyNotes: string }[];
+  medicationSafetySummary?: string;
+  followUpGuidance?: string[];
   confidence?: number;
   data?: {
     smart_questions?: string[];
@@ -39,6 +47,14 @@ interface IntakeSession {
     patient_friendly_summary?: string;
     red_flags?: string[];
     confidence?: number;
+    possible_causes?: IntakeSession['possibleCauses'];
+    missing_information?: string[];
+    recommended_next_steps?: string[];
+    self_care_guidance?: string[];
+    precautions?: string[];
+    medication_considerations?: IntakeSession['medicationConsiderations'];
+    medication_safety_summary?: string;
+    follow_up_guidance?: string[];
   };
   isOfflineGenerated?: boolean;
 }
@@ -51,7 +67,15 @@ const normalizeSession = (session: IntakeSession): IntakeSession => {
     treatmentDraft: session.treatmentDraft ?? apiData?.treatment_draft,
     patientFriendlySummary: session.patientFriendlySummary ?? apiData?.patient_friendly_summary,
     redFlags: session.redFlags ?? apiData?.red_flags,
-    confidence: session.confidence ?? apiData?.confidence
+    confidence: session.confidence ?? apiData?.confidence,
+    possibleCauses: session.possibleCauses ?? apiData?.possible_causes,
+    missingInformation: session.missingInformation ?? apiData?.missing_information,
+    recommendedNextSteps: session.recommendedNextSteps ?? apiData?.recommended_next_steps,
+    selfCareGuidance: session.selfCareGuidance ?? apiData?.self_care_guidance,
+    precautions: session.precautions ?? apiData?.precautions,
+    medicationConsiderations: session.medicationConsiderations ?? apiData?.medication_considerations,
+    medicationSafetySummary: session.medicationSafetySummary ?? apiData?.medication_safety_summary,
+    followUpGuidance: session.followUpGuidance ?? apiData?.follow_up_guidance,
   };
 };
 
@@ -246,7 +270,8 @@ ${selectedSession.treatmentDraft || 'N/A'}
       return;
     }
     const detail = (label: string, value: unknown) => `<div class="detail"><span>${label}</span><strong>${escapeHtml(value || 'Not provided')}</strong></div>`;
-    const optionalSection = (title: string, value?: string) => value ? `<section><h2>${title}</h2><p>${escapeHtml(value)}</p></section>` : '';
+    const listSection = (title: string, values?: string[]) => values?.length ? `<section><h2>${title}</h2><ul>${values.map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul></section>` : '';
+    const causes = selectedSession.possibleCauses?.length ? `<section><h2>What might be causing it</h2><ul>${selectedSession.possibleCauses.map(cause => `<li><strong>${escapeHtml(cause.name)}</strong>: ${escapeHtml(cause.reasoning)}</li>`).join('')}</ul></section>` : '';
     const redFlags = selectedSession.redFlags?.length
       ? `<section class="warning"><h2>Warning signs</h2><ul>${selectedSession.redFlags.map(flag => `<li>${escapeHtml(flag)}</li>`).join('')}</ul></section>`
       : '';
@@ -257,7 +282,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
     printWindow.document.open();
     printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>VaaniDoc Patient Handout</title><style>
       *{box-sizing:border-box}body{margin:0;background:#eef6f4;color:#173f3b;font:15px/1.65 Arial,sans-serif}.page{width:min(760px,calc(100% - 32px));margin:24px auto;padding:38px;background:#fff;border:1px solid #cfe2de;border-radius:14px}.brand{padding-bottom:18px;border-bottom:3px solid #0d9488}.brand h1{margin:0;color:#0d9488;font-size:25px}.brand p{margin:3px 0 0;color:#607a76}.details{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:22px 0}.detail{padding:10px 12px;background:#f5faf9;border:1px solid #dce9e6;border-radius:8px}.detail span{display:block;color:#718984;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}.detail strong{display:block;margin-top:2px;overflow-wrap:anywhere}section{margin-top:20px}h2{margin:0 0 7px;color:#20514b;font-size:16px}p,ul{margin:0;white-space:pre-wrap}.summary{padding:17px;border-left:4px solid #0d9488;background:#f0fdfa}.warning{padding:15px;border:1px solid #efc4bd;background:#fff7f6;border-radius:8px}.warning h2,.warning li{color:#9f2923}.disclaimer{margin-top:28px;padding-top:14px;border-top:1px solid #dce9e6;color:#667e7a;font-size:11px}@media(max-width:560px){.page{padding:22px}.details{grid-template-columns:1fr}}@media print{body{background:#fff}.page{width:100%;margin:0;padding:20px;border:0;border-radius:0}.no-break,section{break-inside:avoid}@page{size:A4;margin:12mm}}
-    </style></head><body><main class="page"><header class="brand"><h1>VaaniDoc</h1><p>Patient Handout</p></header><div class="details">${detail('Patient name', selectedSession.patientName)}${detail('Consult ID', selectedSession.sessionId)}${detail('Age', selectedSession.age)}${detail('Gender', selectedSession.gender)}${detail('Language', selectedSession.languageSpoken)}</div><section class="summary no-break"><h2>Your summary</h2><p>${escapeHtml(selectedSession.patientFriendlySummary)}</p></section>${optionalSection('Instructions and precautions', selectedSession.treatmentDraft)}${redFlags}<footer class="disclaimer"><strong>Clinical disclaimer:</strong> This AI-assisted handout is decision support and must be reviewed with a qualified clinician. Follow the instructions provided by your care team.</footer></main></body></html>`);
+    </style></head><body><main class="page"><header class="brand"><h1>VaaniDoc</h1><p>Patient Handout</p></header><div class="details">${detail('Patient name', selectedSession.patientName)}${detail('Consult ID', selectedSession.sessionId)}${detail('Age', selectedSession.age)}${detail('Gender', selectedSession.gender)}${detail('Language', selectedSession.languageSpoken)}</div><section class="summary no-break"><h2>What we understood</h2><p>${escapeHtml(selectedSession.patientFriendlySummary)}</p></section>${causes}${listSection('What you can do now', selectedSession.selfCareGuidance)}${listSection('Precautions', selectedSession.precautions)}${redFlags}${listSection('Follow-up recommendation', selectedSession.followUpGuidance)}<footer class="disclaimer"><strong>Clinical disclaimer:</strong> Possible causes are not confirmed diagnoses. This AI-assisted handout must be reviewed with a qualified clinician. Medication considerations are intentionally not included unless a separate clinician approval workflow is provided.</footer></main></body></html>`);
     printWindow.document.close();
   };
 
@@ -526,6 +551,9 @@ ${selectedSession.treatmentDraft || 'N/A'}
                           {(selectedSession.clinicalSummary || selectedSession.associatedSymptoms?.length) && (
                             <article className="copilot-section-card">
                               <h4>Clinical Assessment</h4>
+                              <p className="evidence-label">Patient reported</p>
+                              <p>{selectedSession.originalSymptomsText}</p>
+                              <p className="evidence-label">Clinical synthesis</p>
                               {selectedSession.clinicalSummary && <p>{selectedSession.clinicalSummary}</p>}
                               {!!selectedSession.associatedSymptoms?.length && (
                                 <div className="finding-list">
@@ -535,9 +563,19 @@ ${selectedSession.treatmentDraft || 'N/A'}
                             </article>
                           )}
 
+                          {!!selectedSession.possibleCauses?.length && (
+                            <article className="copilot-section-card">
+                              <h4>Possible Causes</h4>
+                              <p className="section-helper">AI considerations — differential possibilities, not confirmed diagnoses.</p>
+                              <div className="cause-list">{selectedSession.possibleCauses.map((cause, index) => <div key={index} className="cause-item"><div><strong>{cause.name}</strong><span className={`confidence-chip confidence-${cause.confidence}`}>{cause.confidence}</span></div><p>{cause.reasoning}</p></div>)}</div>
+                            </article>
+                          )}
+
+                          {!!selectedSession.missingInformation?.length && <article className="copilot-section-card"><h4>Information Still Needed</h4><ul>{selectedSession.missingInformation.map((item, index) => <li key={index}>{item}</li>)}</ul></article>}
+
                           {!!selectedSession.smartQuestions?.length && (
                             <article className="copilot-section-card">
-                              <h4>Suggested Next Steps</h4>
+                              <h4>Suggested Questions</h4>
                               <p className="section-helper">Follow-up questions supplied by the clinical analysis for clinician verification.</p>
                               <div className="question-list">
                                 {selectedSession.smartQuestions.map((question, index) => {
@@ -553,6 +591,17 @@ ${selectedSession.treatmentDraft || 'N/A'}
                             </article>
                           )}
 
+                          {!!selectedSession.recommendedNextSteps?.length && <article className="copilot-section-card"><h4>Recommended Next Steps</h4><p className="evidence-label">Clinical action — requires clinician judgment</p><ul>{selectedSession.recommendedNextSteps.map((item, index) => <li key={index}>{item}</li>)}</ul></article>}
+
+                          {!!selectedSession.selfCareGuidance?.length && <article className="copilot-section-card"><h4>Self-Care / Immediate Support</h4><ul>{selectedSession.selfCareGuidance.map((item, index) => <li key={index}>{item}</li>)}</ul></article>}
+
+                          {!!selectedSession.precautions?.length && <article className="copilot-section-card"><h4>Precautions</h4><ul>{selectedSession.precautions.map((item, index) => <li key={index}>{item}</li>)}</ul></article>}
+
+                          <article className="copilot-section-card medication-card">
+                            <h4>Medication Considerations <span>For clinician review</span></h4>
+                            {selectedSession.medicationConsiderations?.length ? <div className="cause-list">{selectedSession.medicationConsiderations.map((option, index) => <div className="cause-item" key={index}><strong>{option.nameOrClass}</strong><p>{option.purpose}</p><p><b>Only if:</b> {option.conditionsForUse}</p><p><b>Safety:</b> {option.safetyNotes}</p></div>)}</div> : <p>{selectedSession.medicationSafetySummary}</p>}
+                          </article>
+
                           {selectedSession.treatmentDraft && (
                             <article className="copilot-section-card treatment-card">
                               <h4>Treatment Draft</h4>
@@ -566,6 +615,10 @@ ${selectedSession.treatmentDraft || 'N/A'}
                               <ul>{selectedSession.redFlags.map((flag, index) => <li key={index}>{flag}</li>)}</ul>
                             </article>
                           )}
+
+                          <article className="copilot-section-card"><h4>Suggested Specialist</h4><p>{selectedSession.suggestedSpecialist}</p><p className="section-helper">Routing is based on the analyzed broad category and urgency.</p></article>
+
+                          {!!selectedSession.followUpGuidance?.length && <article className="copilot-section-card"><h4>Follow-Up</h4><ul>{selectedSession.followUpGuidance.map((item, index) => <li key={index}>{item}</li>)}</ul></article>}
                         </div>
                         <aside className="clinical-disclaimer">
                           <strong>Clinical disclaimer</strong>
@@ -592,6 +645,11 @@ ${selectedSession.treatmentDraft || 'N/A'}
                             <span className="language-chip">{selectedSession.languageSpoken || 'Language not specified'}</span>
                           </div>
                           <p>{selectedSession.patientFriendlySummary}</p>
+                          {!!selectedSession.possibleCauses?.length && <div className="handout-section"><h5>What might be causing it</h5><ul>{selectedSession.possibleCauses.map((cause, index) => <li key={index}>{cause.name} — {cause.reasoning}</li>)}</ul></div>}
+                          {!!selectedSession.selfCareGuidance?.length && <div className="handout-section"><h5>What you can do now</h5><ul>{selectedSession.selfCareGuidance.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
+                          {!!selectedSession.precautions?.length && <div className="handout-section"><h5>Precautions</h5><ul>{selectedSession.precautions.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
+                          {!!selectedSession.redFlags?.length && <div className="handout-section handout-warning"><h5>When to seek urgent help</h5><ul>{selectedSession.redFlags.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
+                          {!!selectedSession.followUpGuidance?.length && <div className="handout-section"><h5>Follow-up recommendation</h5><ul>{selectedSession.followUpGuidance.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
                         </article>
                         <div className="handout-actions">
                           <button className="btn" onClick={handlePrintHandout}>Print Handout</button>

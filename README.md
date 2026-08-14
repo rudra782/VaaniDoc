@@ -72,11 +72,20 @@ npm run dev
 
 Open the local Vite address shown in the terminal. The landing page links to the patient portal, clinician workspace, and validation dashboard.
 
-## Local AI configuration
+## AI provider configuration
 
-The backend calls Ollama at `http://127.0.0.1:11434` by default. Configure it in `backend/.env`:
+Render cannot reach an Ollama process running on a user's computer. Configure a hosted Gemini provider in the **backend** Render environment (never in Vite/frontend variables):
 
 ```env
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your-server-side-key
+GEMINI_MODEL=gemini-2.0-flash
+```
+
+For local Ollama development, select it explicitly in `backend/.env`:
+
+```env
+AI_PROVIDER=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.2:3b
 ```
@@ -86,6 +95,8 @@ OLLAMA_MODEL=llama3.2:3b
 ```env
 OLLAMA_MODEL=gemma3:4b
 ```
+
+If neither hosted Gemini nor an explicit Ollama URL is configured, the backend reports and uses its conservative generic extractor rather than a canned clinical scenario.
 
 ## Validation
 

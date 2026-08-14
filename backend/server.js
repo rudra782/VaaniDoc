@@ -130,47 +130,6 @@ function mapIntakeSession(session) {
       : Array.isArray(session.data?.red_flags)
         ? [...session.data.red_flags]
         : [];
-  const lowercaseText = (session.originalSymptomsText || "").toLowerCase();
-
-  if (
-    lowercaseText.includes("breath") ||
-    lowercaseText.includes("सांस") ||
-    lowercaseText.includes("மூச்சு") ||
-    lowercaseText.includes("శ్యాస") ||
-    lowercaseText.includes("শ্বাস")
-  ) {
-    if (!red_flags.some((flag) => /breath|respirat/i.test(flag))) {
-      red_flags.push("Difficulty breathing / Respiratory distress");
-    }
-    urgency = "high";
-  }
-
-  if (
-    lowercaseText.includes("chest pain") ||
-    lowercaseText.includes("सीना दर्द") ||
-    lowercaseText.includes("நெஞ்சு வலி") ||
-    lowercaseText.includes("గుండె నొప్పి") ||
-    lowercaseText.includes("বুকে ব্যথা")
-  ) {
-    if (!red_flags.some((flag) => /chest|cardiac|heart/i.test(flag))) {
-      red_flags.push("Severe chest pain / Suspected cardiac event");
-    }
-    urgency = "emergency";
-  }
-
-  if (
-    lowercaseText.includes("stroke") ||
-    lowercaseText.includes("paralysis") ||
-    lowercaseText.includes("लकवा") ||
-    lowercaseText.includes("பக்கவாதம்") ||
-    lowercaseText.includes("పక్షవాతం")
-  ) {
-    if (!red_flags.some((flag) => /stroke|neurolog|paralysis/i.test(flag))) {
-      red_flags.push("Sudden severe neurological symptoms / Stroke");
-    }
-    urgency = "emergency";
-  }
-
   const suggestedSpecialist = resolveSuggestedSpecialist(
     {
       ...session,
@@ -211,6 +170,16 @@ function mapIntakeSession(session) {
     session.clinicalSummary ?? session.clinical_summary ?? session.data?.clinical_summary;
   const urgencyReason =
     session.urgencyReason ?? session.urgency_reason ?? session.data?.urgency_reason;
+  const copilotFields = {
+    possibleCauses: session.possibleCauses ?? session.data?.possible_causes ?? [],
+    missingInformation: session.missingInformation ?? session.data?.missing_information ?? [],
+    recommendedNextSteps: session.recommendedNextSteps ?? session.data?.recommended_next_steps ?? [],
+    selfCareGuidance: session.selfCareGuidance ?? session.data?.self_care_guidance ?? [],
+    precautions: session.precautions ?? session.data?.precautions ?? [],
+    medicationConsiderations: session.medicationConsiderations ?? session.data?.medication_considerations ?? [],
+    medicationSafetySummary: session.medicationSafetySummary ?? session.data?.medication_safety_summary,
+    followUpGuidance: session.followUpGuidance ?? session.data?.follow_up_guidance ?? [],
+  };
 
   const data = {
     language,
@@ -228,6 +197,14 @@ function mapIntakeSession(session) {
     clinical_summary: clinicalSummary,
     symptom_categories: symptomCategories,
     urgency_reason: urgencyReason,
+    possible_causes: copilotFields.possibleCauses,
+    missing_information: copilotFields.missingInformation,
+    recommended_next_steps: copilotFields.recommendedNextSteps,
+    self_care_guidance: copilotFields.selfCareGuidance,
+    precautions: copilotFields.precautions,
+    medication_considerations: copilotFields.medicationConsiderations,
+    medication_safety_summary: copilotFields.medicationSafetySummary,
+    follow_up_guidance: copilotFields.followUpGuidance,
   };
 
   return {
@@ -264,6 +241,7 @@ function mapIntakeSession(session) {
     clinicalSummary,
     urgencyReason,
     redFlags: red_flags,
+    ...copilotFields,
 
     success: true,
     data,
