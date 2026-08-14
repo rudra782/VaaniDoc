@@ -195,6 +195,13 @@ body {
   animation: fadeIn 0.3s ease-out;
 }
 
+/* The doctor portal is a workstation, not a narrow reading column. Keep the
+   general 1250px content measure for intake/validation pages only. */
+.main-content.doctor-main-content {
+  max-width: none;
+  padding-inline: clamp(1rem, 2vw, 2rem);
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
@@ -1396,4 +1403,32 @@ body {
   .landing-actions { flex-direction: column; }.landing-actions .btn { width: 100%; }
   .trust-strip { grid-template-columns: 1fr 1fr; }.trust-strip div:nth-child(2) { border-right: 0; }
   .landing-section { padding: 2.75rem 0 .5rem; }
+}
+
+/* Doctor dashboard readability and hierarchy */
+.doctor-main-content .clinical-workspace { width: 100%; min-width: 0; }
+.doctor-main-content .dashboard-grid { grid-template-columns: minmax(280px, 320px) minmax(0, 1fr); }
+.doctor-main-content .patient-details-view { min-width: 0; }
+.overview-stage-label { display: block; margin-bottom: .25rem; color: #0f766e; font-size: .7rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.patient-overview-row { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .8rem; }
+.patient-overview-row > span { min-width: 130px; padding: .5rem .65rem; border: 1px solid #dce9e6; border-radius: 8px; background: white; }
+.patient-overview-row small { display: block; color: #6b827e; font-size: .68rem; font-weight: 750; }
+.patient-overview-row strong { display: block; margin-top: .08rem; color: #173f3b; font-size: .84rem; }
+.patient-overview-row strong[class^="urgency-"] { width: fit-content; padding: .15rem .4rem; border-radius: 5px; }
+.clinical-report-heading { margin: 1.5rem 0 .9rem; padding-top: 1.25rem; border-top: 2px solid #dbe9e6; }
+.clinical-report-heading h3 { margin: .15rem 0; color: #153f3b; font: 800 1.25rem var(--font-title); }
+.clinical-report-heading > span { color: #617b77; font-size: .84rem; }
+.secondary-report-card { align-self: start; background: #fbfefd; }
+.secondary-report-card summary { cursor: pointer; color: #234d48; font: 800 .9rem var(--font-title); }
+.secondary-report-card[open] summary { margin-bottom: .75rem; }
+.doctor-main-content .copilot-section-card h4 { font-size: 1rem; }
+.doctor-main-content .copilot-section-card p,
+.doctor-main-content .copilot-section-card ul { font-size: .9rem; line-height: 1.65; }
+
+@media (max-width: 1050px) {
+  .doctor-main-content .dashboard-grid { grid-template-columns: minmax(250px, 285px) minmax(0, 1fr); gap: 1rem; }
+}
+
+@media (max-width: 900px) {
+  .doctor-main-content .dashboard-grid { grid-template-columns: 1fr; }
 }

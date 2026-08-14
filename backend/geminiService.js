@@ -41,7 +41,13 @@ export function extractExplicitSeverity(text = "") {
 }
 
 export function extractExplicitSymptoms(text = "") {
-  return SYMPTOM_PATTERNS.filter(([, pattern]) => pattern.test(text)).map(([name]) => name);
+  return SYMPTOM_PATTERNS.filter(([, pattern]) => {
+    const match = text.match(pattern);
+    if (!match || match.index == null) return false;
+    const prefix = text.slice(Math.max(0, match.index - 18), match.index);
+    const line = text.slice(text.lastIndexOf("\n", match.index) + 1, text.indexOf("\n", match.index) < 0 ? text.length : text.indexOf("\n", match.index));
+    return !/\b(?:no|not|denies|without)\s*$/i.test(prefix) && !/:\s*(?:no|none|denied|absent)\b/i.test(line);
+  }).map(([name]) => name);
 }
 
 export function detectExplicitRedFlags(text = "") {
@@ -83,6 +89,24 @@ function complaintFor(text, category) {
 function genericQuestions(category) {
   const focus = ({ Gastrointestinal: "Where exactly is the symptom or pain located?", Musculoskeletal: "Where exactly does it hurt, and was there an injury?", Dermatological: "Where is the itching or skin change, and what does it look like?", Neurological: "Is the symptom sudden, and are there any changes in strength, speech, vision, or balance?", Respiratory: "Is breathing affected, and is the cough dry or producing mucus?", Urinary: "Is there burning, blood, fever, or a change in urine frequency?", Ophthalmological: "Is there eye pain, discharge, injury, or any change in vision?", ENT: "Is there discharge, hearing change, fever, or a recent infection?" })[category] || "Where exactly do you feel the symptom?";
   return [focus, "When did it start, and how severe is it?", "Are there any other symptoms or warning signs you have noticed?"];
+}
+
+function suggestedExamFor(category) {
+  return ({
+    Gastrointestinal: ["Record relevant vital signs", "Focused abdominal examination", "Assess hydration status"],
+    Respiratory: ["Record respiratory rate and oxygen saturation", "Assess breathing effort", "Focused chest examination"],
+    Neurological: ["Record relevant vital signs", "Focused neurological examination", "Assess gait, speech, strength, and vision as indicated"],
+    Musculoskeletal: ["Inspect the affected area", "Assess tenderness, movement, function, and neurovascular status as indicated"],
+  })[category] || ["Record relevant vital signs", "Perform a focused examination guided by the complaint"];
+}
+
+function warningSignsFor(category) {
+  return ({
+    Gastrointestinal: ["Severe or rapidly worsening pain", "Blood in vomit or stool", "Inability to keep fluids down", "Fainting or new confusion"],
+    Respiratory: ["New severe breathing difficulty", "Blue lips or face", "Chest pain, fainting, or new confusion"],
+    Neurological: ["New one-sided weakness", "New speech or vision change", "Seizure or loss of consciousness"],
+    Musculoskeletal: ["New numbness, weakness, loss of circulation, or inability to use the limb", "Rapidly increasing swelling or uncontrolled pain"],
+  })[category] || ["A severe or rapidly worsening symptom", "Fainting, new confusion, or difficulty breathing"];
 }
 
 function missingClinicalInformation(duration, severity, patientDetails = {}) {
@@ -162,6 +186,9 @@ export function createConservativeFallback(text, language = "English", patientDe
     medicationConsiderations: [],
     medicationSafetySummary: "Medication cannot yet be responsibly suggested because key clinical and medication-safety information is missing.",
     followUpGuidance: support.followUp,
+    suggestedExamination: suggestedExamFor(category),
+    possibleInvestigations: [],
+    warningSignsToWatchFor: warningSignsFor(category).filter((warning) => !redFlags.some((flag) => warning.toLowerCase().includes(flag.toLowerCase()))),
     treatmentDraft: redFlags.length ? "Arrange immediate emergency assessment. Keep the patient safe while awaiting emergency care; further treatment requires clinician evaluation." : "Further clinician assessment is needed before a treatment plan can be drafted. Until reviewed, avoid activities that worsen the reported symptom and seek urgent help if a new severe warning sign develops.",
     redFlags,
     patientFriendlySummary: redFlags.length ? `You reported: ${text.trim()} This includes a warning sign that needs immediate emergency assessment.` : `You reported: ${text.trim()} A clinician should ask for the missing details before recommending treatment.`,
@@ -169,7 +196,7 @@ export function createConservativeFallback(text, language = "English", patientDe
   };
 }
 
-const SYSTEM_PROMPT = `You are VaaniDoc, a supervised clinical intake assistant. Return only JSON with these exact keys: translatedSymptomsText, chiefComplaint, clinicalSummary, duration, severity, associatedSymptoms, symptomCategories, urgencyClassification, urgencyReason, suggestedSpecialist, possibleCauses, missingInformation, smartQuestions, recommendedNextSteps, selfCareGuidance, precautions, medicationConsiderations, medicationSafetySummary, followUpGuidance, treatmentDraft, redFlags, patientFriendlySummary.
+const SYSTEM_PROMPT = `You are VaaniDoc, a supervised clinical intake assistant. Return only JSON with these exact keys: translatedSymptomsText, chiefComplaint, clinicalSummary, duration, severity, associatedSymptoms, symptomCategories, urgencyClassification, urgencyReason, suggestedSpecialist, possibleCauses, missingInformation, smartQuestions, recommendedNextSteps, suggestedExamination, possibleInvestigations, selfCareGuidance, precautions, medicationConsiderations, medicationSafetySummary, followUpGuidance, treatmentDraft, redFlags, warningSignsToWatchFor, patientFriendlySummary.
 
 Use only facts stated or clearly implied by the patient's narration.
 Do not add symptoms, duration, severity, associated findings, or red flags that were not mentioned.
@@ -210,6 +237,9 @@ function normalizeAI(result, fallback, provider) {
     medicationConsiderations: hasMedicationSafetyContext && Array.isArray(result.medicationConsiderations) ? result.medicationConsiderations.slice(0, 4) : [],
     medicationSafetySummary: hasMedicationSafetyContext ? String(result.medicationSafetySummary || fallback.medicationSafetySummary) : fallback.medicationSafetySummary,
     followUpGuidance: strings(result.followUpGuidance, fallback.followUpGuidance),
+    suggestedExamination: strings(result.suggestedExamination, fallback.suggestedExamination),
+    warningSignsToWatchFor: strings(result.warningSignsToWatchFor, fallback.warningSignsToWatchFor),
+    possibleInvestigations: Array.isArray(result.possibleInvestigations) ? result.possibleInvestigations.slice(0, 5).filter((item) => item?.name && item?.reason).map((item) => ({ name: String(item.name), reason: String(item.reason), priority: ["optional", "consider", "recommended"].includes(item.priority) ? item.priority : "consider" })) : fallback.possibleInvestigations,
     suggestedSpecialist: inferRoutingFromCategory(result.symptomCategories?.[0] || fallback.symptomCategories[0], fallback.urgencyClassification),
     analysisProvider: provider,
   };
@@ -226,6 +256,57 @@ export async function analyzeSymptoms(text, language, patientDetails = {}) {
     console.error(`Configured AI provider unavailable; using conservative fallback: ${error.message}`);
   }
   return fallback;
+}
+
+const answerText = (answers = []) => answers.filter((item) => item?.question && item?.answer?.trim()).map((item) => `${item.question}: ${item.answer.trim()}`).join("\n");
+
+export function calculateConsultationCompleteness(session = {}) {
+  const answers = answerText(session.consultationAnswers).toLowerCase();
+  const source = `${session.originalSymptomsText || ""}\n${answers}\n${session.clinicianNotes || ""}\n${session.examinationNotes || ""}`.toLowerCase();
+  const vitals = session.vitals || {};
+  const dimensions = [
+    [Boolean(session.chiefComplaint && !/reported symptom|general consultation/i.test(session.chiefComplaint)), "Chief complaint"],
+    [session.duration && session.duration !== "Not specified" || /\b(duration|start|onset|how long)\b[^\n:]*:\s*\S+/i.test(answers), "Duration/onset"],
+    [session.severity && session.severity !== "Not specified" || /\b(severe|severity|pain score|\d+\s*\/\s*10)\b/i.test(source), "Severity and functional impact"],
+    [/\b(location|where|upper|lower|left|right|central|after food|after meal|when walking)\b/i.test(source), "Exact location or clinical context"],
+    [/(associated|other symptoms|vomit|fever|nausea|breath|weakness|denies|\bno\b)/i.test(answers), "Associated symptoms"],
+    [/(red flag|warning|blood|faint|confusion|seizure|breathing|weakness|speech)/i.test(answers) || (session.redFlags?.length || 0) > 0, "Relevant red flags assessed"],
+    [/(history|previous|chronic|surgery|pregnan|similar episode)/i.test(source), "Relevant medical history"],
+    [/(medication|medicine|allerg)/i.test(source), "Medication and allergy history"],
+    [(session.smartQuestions?.length || 0) > 0 && session.smartQuestions.every((q) => session.consultationAnswers?.some((a) => a.question === q && a.answer?.trim())), "Current guided questions answered"],
+    [Object.values(vitals).some((value) => String(value || "").trim()), "Clinically relevant vital signs"],
+  ];
+  const achieved = dimensions.filter(([known]) => known).length;
+  return { consultationCompleteness: Math.round(achieved / dimensions.length * 100), completenessMissingItems: dimensions.filter(([known]) => !known).map(([, label]) => label) };
+}
+
+export async function reanalyzeConsultation(session, updates = {}) {
+  const consultationAnswers = Array.isArray(updates.consultationAnswers) ? updates.consultationAnswers.filter((item) => item?.question && typeof item.answer === "string") : session.consultationAnswers || [];
+  const clinicianNotes = String(updates.clinicianNotes ?? session.clinicianNotes ?? "");
+  const vitals = updates.vitals && typeof updates.vitals === "object" ? updates.vitals : session.vitals || {};
+  const examinationNotes = String(updates.examinationNotes ?? session.examinationNotes ?? "");
+  const demographics = { name: session.patientName, age: session.age, gender: session.gender, allergies: session.allergies, currentMedications: session.currentMedications, chronicDiseases: session.chronicDiseases };
+  const context = `PATIENT ORIGINAL NARRATION\n${session.originalSymptomsText}\n\nCLINICIAN-COLLECTED FOLLOW-UP ANSWERS\n${answerText(consultationAnswers) || "Unknown"}\n\nVITALS\n${JSON.stringify(vitals)}\n\nEXAMINATION NOTES\n${examinationNotes || "Unknown"}\n\nADDITIONAL CLINICIAN NOTES\n${clinicianNotes || "Unknown"}\n\nDEMOGRAPHICS\n${JSON.stringify(demographics)}\n\nUse each clinician-recorded answer as evidence equal to the original narration. A negative answer means the finding is absent. Never invent a missing finding.`;
+  const analysis = await analyzeSymptoms(context, session.languageSpoken || "English", demographics);
+  const answersText = answerText(consultationAnswers);
+  const durationAnswer = answersText.match(/(?:when|start|duration|how long)[^:]*:\s*([^\n]+)/i)?.[1];
+  const severityAnswer = answersText.match(/(?:severity|severe|pain)[^:]*:\s*([^\n]*(?:\d+\s*\/\s*10|mild|moderate|severe)[^\n]*)/i)?.[1];
+  if (durationAnswer) analysis.duration = durationAnswer;
+  if (severityAnswer) analysis.severity = severityAnswer;
+  const answeredTopics = {
+    duration: Boolean(durationAnswer), severity: Boolean(severityAnswer), location: /(where|location)[^:]*:\s*\S+/i.test(answersText),
+    associated: /(vomit|fever|nausea|other symptom|associated)[^:]*:\s*\S+/i.test(answersText), allergies: /allerg[^:]*:\s*\S+/i.test(answersText), medications: /medicat|medicine[^:]*:\s*\S+/i.test(answersText),
+  };
+  analysis.missingInformation = (analysis.missingInformation || []).filter((item) => !(
+    answeredTopics.duration && /duration|onset/i.test(item) || answeredTopics.severity && /severity|activities/i.test(item) || answeredTopics.location && /location|pattern|trigger|relieving/i.test(item) || answeredTopics.associated && /associated|warning/i.test(item) || answeredTopics.allergies && /allerg/i.test(item) || answeredTopics.medications && /current medication|interaction/i.test(item)
+  ));
+  analysis.smartQuestions = (analysis.smartQuestions || []).filter((question) => !consultationAnswers.some((item) => item.answer?.trim() && item.question === question));
+  if (analysis.symptomCategories?.[0] === "Gastrointestinal" && /(upper abdomen|after (?:food|meal))/i.test(answersText + clinicianNotes)) {
+    analysis.possibleCauses = [{ name: "Upper gastrointestinal causes", reasoning: "Upper abdominal location and worsening after food were clinician-recorded; examination and fuller history are still required to distinguish among causes.", confidence: "low" }, ...(analysis.possibleCauses || [])].slice(0, 5);
+    analysis.possibleInvestigations = [{ name: "Targeted testing after examination", reason: "The upper abdominal and meal-related pattern may justify targeted testing only if the focused examination or remaining history identifies an indication.", priority: "consider" }];
+  }
+  const updated = { ...session, ...analysis, originalSymptomsText: session.originalSymptomsText, consultationAnswers, clinicianNotes, vitals, examinationNotes };
+  return { ...updated, ...calculateConsultationCompleteness(updated), analysisVersion: (Number(session.analysisVersion) || 1) + 1, lastAnalyzedAt: new Date().toISOString(), isConsultationFinalized: false, assessmentStage: "Updated after Consultation" };
 }
 
 export function resolveSuggestedSpecialist(analysis = {}, symptomText = "") {
