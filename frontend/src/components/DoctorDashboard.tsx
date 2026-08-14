@@ -1,5 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
+import API_URL from '../config';
+import { createQrMatrix } from '../utils/qrCode';
+
+const escapeHtml = (value: unknown) => String(value ?? '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#039;');
+
+const LocalQrCode: React.FC<{ value: string }> = ({ value }) => {
+  try {
+    const matrix = createQrMatrix(value);
+    const quietZone = 4;
+    const size = matrix.length + quietZone * 2;
+    return (
+      <svg className="handout-qr" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="QR code containing this patient's handout summary" shapeRendering="crispEdges">
+        <rect width={size} height={size} fill="#ffffff" />
+        {matrix.flatMap((row, y) => row.map((dark, x) => dark ? <rect key={`${x}-${y}`} x={x + quietZone} y={y + quietZone} width="1" height="1" fill="#0f172a" /> : null))}
+      </svg>
+    );
+  } catch (error) {
+    return <div className="qr-error" role="alert">{error instanceof Error ? error.message : 'Unable to create QR code.'}</div>;
+  }
+};
 
 interface IntakeSession {
   sessionId: string;
@@ -22,17 +47,41 @@ interface IntakeSession {
   smartQuestions?: string[];
   treatmentDraft?: string;
   patientFriendlySummary?: string;
+  redFlags?: string[];
+  confidence?: number;
+  data?: {
+    smart_questions?: string[];
+    treatment_draft?: string;
+    patient_friendly_summary?: string;
+    red_flags?: string[];
+    confidence?: number;
+  };
   isOfflineGenerated?: boolean;
 }
+
+const normalizeSession = (session: IntakeSession): IntakeSession => {
+  const apiData = session.data;
+  return {
+    ...session,
+    smartQuestions: session.smartQuestions ?? apiData?.smart_questions,
+    treatmentDraft: session.treatmentDraft ?? apiData?.treatment_draft,
+    patientFriendlySummary: session.patientFriendlySummary ?? apiData?.patient_friendly_summary,
+    redFlags: session.redFlags ?? apiData?.red_flags,
+    confidence: session.confidence ?? apiData?.confidence
+  };
+};
 
 interface DoctorDashboardProps {
   initialSessions: IntakeSession[];
   onSessionCleared: (sessionId: string) => void;
   lowBandwidthMode: boolean;
+  sessionsLoading: boolean;
+  sessionsError: string | null;
+  onRetrySessions: () => void;
 }
 
-export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSessions, onSessionCleared, lowBandwidthMode }) => {
-  const [sessions, setSessions] = useState<IntakeSession[]>(initialSessions);
+export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSessions, onSessionCleared, lowBandwidthMode, sessionsLoading, sessionsError, onRetrySessions }) => {
+  const [sessions, setSessions] = useState<IntakeSession[]>(() => initialSessions.map(normalizeSession));
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [newSessionNotification, setNewSessionNotification] = useState<string | null>(null);
@@ -41,7 +90,8 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
   const [copilotTab, setCopilotTab] = useState<'clinical' | 'patient'>('clinical');
   const [checkedQuestions, setCheckedQuestions] = useState<Record<string, boolean>>({});
   const [showQRModal, setShowQRModal] = useState(false);
-  const [smsSentText, setSmsSentText] = useState(false);
+  const [summaryCopied, setSummaryCopied] = useState(false);
+  const [copilotError, setCopilotError] = useState<string | null>(null);
 
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
@@ -50,7 +100,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
 
   // Sync state with props
   useEffect(() => {
-    setSessions(initialSessions);
+    setSessions(initialSessions.map(normalizeSession));
     if (initialSessions.length > 0 && !selectedSessionId) {
       setSelectedSessionId(initialSessions[0].sessionId);
     }
@@ -58,7 +108,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
 
   // Connect to Socket.io for live updates
   useEffect(() => {
-    const socket: Socket = io('http://localhost:5000');
+    const socket: Socket = io(API_URL);
 
     socket.on('connect', () => {
       setIsConnected(true);
@@ -71,8 +121,13 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
     });
 
     socket.on('sessions-update', (updatedSessions: IntakeSession[]) => {
-      const sorted = sortSessionsByUrgency(updatedSessions);
+      if (!Array.isArray(updatedSessions)) {
+        setCopilotError('The live session response was not in the expected format.');
+        return;
+      }
+      const sorted = sortSessionsByUrgency(updatedSessions.map(normalizeSession));
       setSessions(sorted);
+      setCopilotError(null);
       
       if (sorted.length > 0) {
         if (!sorted.some(s => s.sessionId === selectedSessionId)) {
@@ -119,7 +174,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
 
   const handleDismissPatient = async (sessionId: string) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/session/${sessionId}/end`, {
+      const response = await fetch(`${API_URL}/api/session/${sessionId}/end`, {
         method: 'POST'
       });
 
@@ -180,11 +235,6 @@ ${selectedSession.treatmentDraft || 'N/A'}
     alert('Professional clinical note copied to clipboard in markdown format!');
   };
 
-  const handleSendSMS = () => {
-    setSmsSentText(true);
-    setTimeout(() => setSmsSentText(false), 3000);
-  };
-
   const toggleQuestionCheck = (idx: number) => {
     setCheckedQuestions(prev => ({
       ...prev,
@@ -193,8 +243,49 @@ ${selectedSession.treatmentDraft || 'N/A'}
   };
 
   const selectedSession = sessions.find(s => s.sessionId === selectedSessionId);
+  const handoutQrPayload = selectedSession ? [
+    'VaaniDoc Patient Handout',
+    `Patient: ${selectedSession.patientName || 'Not provided'}`,
+    `Consult ID: ${selectedSession.sessionId || 'Not provided'}`,
+    `Language: ${selectedSession.languageSpoken || 'Not provided'}`,
+    `Summary: ${selectedSession.patientFriendlySummary || 'Not available'}`
+  ].join('\n') : '';
   const urgentCount = sessions.filter(s => s.urgencyClassification === 'Emergency' || s.urgencyClassification === 'High').length;
   const offlineCount = sessions.filter(s => s.isOfflineGenerated).length;
+
+  const handlePrintHandout = () => {
+    if (!selectedSession?.patientFriendlySummary) return;
+    const printWindow = window.open('', '_blank', 'width=820,height=900');
+    if (!printWindow) {
+      alert('Please allow pop-ups to print the patient handout.');
+      return;
+    }
+    const detail = (label: string, value: unknown) => `<div class="detail"><span>${label}</span><strong>${escapeHtml(value || 'Not provided')}</strong></div>`;
+    const optionalSection = (title: string, value?: string) => value ? `<section><h2>${title}</h2><p>${escapeHtml(value)}</p></section>` : '';
+    const redFlags = selectedSession.redFlags?.length
+      ? `<section class="warning"><h2>Warning signs</h2><ul>${selectedSession.redFlags.map(flag => `<li>${escapeHtml(flag)}</li>`).join('')}</ul></section>`
+      : '';
+    printWindow.addEventListener('load', () => {
+      printWindow.onafterprint = () => printWindow.close();
+      printWindow.setTimeout(() => { printWindow.focus(); printWindow.print(); }, 100);
+    }, { once: true });
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>VaaniDoc Patient Handout</title><style>
+      *{box-sizing:border-box}body{margin:0;background:#eef6f4;color:#173f3b;font:15px/1.65 Arial,sans-serif}.page{width:min(760px,calc(100% - 32px));margin:24px auto;padding:38px;background:#fff;border:1px solid #cfe2de;border-radius:14px}.brand{padding-bottom:18px;border-bottom:3px solid #0d9488}.brand h1{margin:0;color:#0d9488;font-size:25px}.brand p{margin:3px 0 0;color:#607a76}.details{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:22px 0}.detail{padding:10px 12px;background:#f5faf9;border:1px solid #dce9e6;border-radius:8px}.detail span{display:block;color:#718984;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}.detail strong{display:block;margin-top:2px;overflow-wrap:anywhere}section{margin-top:20px}h2{margin:0 0 7px;color:#20514b;font-size:16px}p,ul{margin:0;white-space:pre-wrap}.summary{padding:17px;border-left:4px solid #0d9488;background:#f0fdfa}.warning{padding:15px;border:1px solid #efc4bd;background:#fff7f6;border-radius:8px}.warning h2,.warning li{color:#9f2923}.disclaimer{margin-top:28px;padding-top:14px;border-top:1px solid #dce9e6;color:#667e7a;font-size:11px}@media(max-width:560px){.page{padding:22px}.details{grid-template-columns:1fr}}@media print{body{background:#fff}.page{width:100%;margin:0;padding:20px;border:0;border-radius:0}.no-break,section{break-inside:avoid}@page{size:A4;margin:12mm}}
+    </style></head><body><main class="page"><header class="brand"><h1>VaaniDoc</h1><p>Patient Handout</p></header><div class="details">${detail('Patient name', selectedSession.patientName)}${detail('Consult ID', selectedSession.sessionId)}${detail('Age', selectedSession.age)}${detail('Gender', selectedSession.gender)}${detail('Language', selectedSession.languageSpoken)}</div><section class="summary no-break"><h2>Your summary</h2><p>${escapeHtml(selectedSession.patientFriendlySummary)}</p></section>${optionalSection('Instructions and precautions', selectedSession.treatmentDraft)}${redFlags}<footer class="disclaimer"><strong>Clinical disclaimer:</strong> This AI-assisted handout is decision support and must be reviewed with a qualified clinician. Follow the instructions provided by your care team.</footer></main></body></html>`);
+    printWindow.document.close();
+  };
+
+  const handleCopyHandoutSummary = async () => {
+    if (!selectedSession) return;
+    try {
+      await navigator.clipboard.writeText(handoutQrPayload);
+      setSummaryCopied(true);
+      window.setTimeout(() => setSummaryCopied(false), 2000);
+    } catch {
+      alert('Unable to copy the handout summary. Please check clipboard permissions.');
+    }
+  };
 
   // Filtered queue compilation
   const filteredSessions = sortSessionsByUrgency(sessions).filter((s) => {
@@ -239,7 +330,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
           <div><strong>{offlineCount}</strong><span>Local rule intakes</span></div>
         </div>
       </section>
-      <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '1.5rem' }}>
+      <div className="dashboard-grid">
       
       {/* Real-time sync notification banner */}
       {newSessionNotification && (
@@ -250,7 +341,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
       )}
 
       {/* Sidebar: Patient Queue */}
-      <div className="patient-queue" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', height: 'fit-content' }}>
+      <aside className="patient-queue">
         <div className="queue-header" style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fafbfb' }}>
           <span style={{ fontWeight: 800, fontSize: '0.9rem', textTransform: 'uppercase', color: 'var(--text-main)' }}>Patient Triage Queue</span>
           <span className="badge">{filteredSessions.length} Active</span>
@@ -297,8 +388,15 @@ ${selectedSession.treatmentDraft || 'N/A'}
           </div>
         </div>
 
-        <div className="queue-list" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-          {filteredSessions.length === 0 ? (
+        <div className="queue-list">
+          {sessionsLoading && sessions.length === 0 ? (
+            <div className="dashboard-state" role="status"><span className="state-spinner" aria-hidden="true" /><strong>Loading intake queue…</strong></div>
+          ) : sessionsError && sessions.length === 0 ? (
+            <div className="dashboard-state dashboard-state-error" role="alert">
+              <strong>Queue unavailable</strong><span>{sessionsError}</span>
+              <button className="btn" onClick={onRetrySessions}>Try again</button>
+            </div>
+          ) : filteredSessions.length === 0 ? (
             <div className="empty-state" style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
               <p style={{ margin: 0, fontSize: '0.85rem' }}>No matching patient intakes.</p>
             </div>
@@ -346,10 +444,10 @@ ${selectedSession.treatmentDraft || 'N/A'}
             {isConnected ? 'LIVE WS FEED' : 'RECONNECTING...'}
           </span>
         </div>
-      </div>
+      </aside>
 
       {/* Main Panel: EHR Clinical Intake Record */}
-      <div className="patient-details-view" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <section className="patient-details-view">
         {selectedSession ? (
           <>
             {/* Pulsating danger overlay for emergency patients */}
@@ -370,14 +468,14 @@ ${selectedSession.treatmentDraft || 'N/A'}
               </div>
             )}
 
-            <div className="details-header" style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', backgroundColor: '#fafbfb' }}>
+            <div className="details-header">
               <div className="details-title">
                 <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>{selectedSession.patientName || 'Anonymous'}</h2>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
                   Consult ID: <strong style={{ color: 'var(--text-main)', fontFamily: 'var(--font-mono)' }}>{selectedSession.sessionId}</strong> &bull; Age: {selectedSession.age || 'N/A'} &bull; Gender: {selectedSession.gender} &bull; Native Dialect: {selectedSession.languageSpoken}
                 </p>
               </div>
-              <div className="details-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+              <div className="details-actions">
                 <button className="btn" style={{ width: 'auto', padding: '0.45rem 0.85rem', fontSize: '0.8rem', fontWeight: 700 }} onClick={handleCopyNote}>
                   📋 Copy EHR Note
                 </button>
@@ -390,286 +488,135 @@ ${selectedSession.treatmentDraft || 'N/A'}
               </div>
             </div>
 
-            <div className="details-body" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              <div className="clinical-report" style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1.5rem', backgroundColor: '#ffffff' }}>
-                
-                {/* EHR Header Row */}
-                <div className="clinical-header-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.25rem', marginBottom: '1.25rem' }}>
-                  <div className="clinical-header-cell">
-                    <strong style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Triage Priority</strong>
-                    <span className={`clinical-urgency-banner urgency-${selectedSession.urgencyClassification}`} style={{ display: 'inline-block', fontWeight: 800, padding: '0.15rem 0.5rem', fontSize: '0.75rem', borderRadius: '4px' }}>
-                      {selectedSession.urgencyClassification}
-                    </span>
-                  </div>
-                  
-                  <div className="clinical-header-cell">
-                    <strong style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Suggested Specialist</strong>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                      {selectedSession.suggestedSpecialist}
-                    </span>
-                  </div>
-
-                  <div className="clinical-header-cell">
-                    <strong style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Symptom Severity</strong>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                      {selectedSession.severity}
-                    </span>
-                  </div>
-
-                  <div className="clinical-header-cell">
-                    <strong style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>LLM Extraction Confidence</strong>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary)' }}>
-                      {selectedSession.isOfflineGenerated ? 'N/A (Local Rules)' : '94% (Structured validation)'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Chief Complaint */}
-                <div className="clinical-section-block" style={{ marginBottom: '1.25rem' }}>
-                  <h4 className="clinical-section-title" style={{ margin: '0 0 0.35rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>Chief Complaint</h4>
-                  <p className="clinical-section-content" style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)' }}>
-                    {selectedSession.chiefComplaint}
-                  </p>
-                </div>
-
-                {/* Clinical Summary */}
-                <div className="clinical-section-block" style={{ marginBottom: '1.25rem' }}>
-                  <h4 className="clinical-section-title" style={{ margin: '0 0 0.35rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>History of Present Illness / Summary</h4>
-                  <p className="clinical-section-content" style={{ margin: 0, fontSize: '0.9rem', lineHeight: '1.6', color: 'var(--text-body)' }}>
-                    {selectedSession.clinicalSummary}
-                  </p>
-                </div>
-
-                {/* Duration */}
-                <div className="clinical-section-block" style={{ marginBottom: '1.25rem' }}>
-                  <h4 className="clinical-section-title" style={{ margin: '0 0 0.35rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>Duration of Symptoms</h4>
-                  <p className="clinical-section-content" style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-body)', fontWeight: 600 }}>
-                    {selectedSession.duration || 'Not specified'}
-                  </p>
-                </div>
-
-                {/* Urgency justification */}
-                <div className="clinical-section-block" style={{ marginBottom: '1.25rem' }}>
-                  <h4 className="clinical-section-title" style={{ margin: '0 0 0.35rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>Triage Justification (Why this urgency?)</h4>
-                  <p className="clinical-section-content" style={{ margin: 0, fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                    {selectedSession.urgencyReason}
-                  </p>
-                </div>
-
-                {/* Categories & Associated symptoms */}
-                <div className="clinical-section-block" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.25rem' }}>
+            <div className="details-body">
+              {/* Clinical decision-support workspace */}
+              <section className="copilot-workspace" aria-labelledby="copilot-workspace-title">
+                <div className="copilot-workspace-heading">
                   <div>
-                    <h4 className="clinical-section-title" style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>Symptom Categories</h4>
-                    <div className="badge-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                      {selectedSession.symptomCategories && selectedSession.symptomCategories.length > 0 ? (
-                        selectedSession.symptomCategories.map((cat, idx) => (
-                          <span key={idx} className="clinical-badge" style={{ backgroundColor: 'var(--primary-light)', color: 'var(--primary)', border: '1px solid rgba(13,148,136,0.15)', padding: '0.15rem 0.45rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>
-                            {cat}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="clinical-badge">Unclassified</span>
-                      )}
-                    </div>
+                    <p className="copilot-kicker">Consultation workspace</p>
+                    <h3 id="copilot-workspace-title">Clinical decision support</h3>
                   </div>
-                  <div>
-                    <h4 className="clinical-section-title" style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>Associated Symptoms</h4>
-                    <div className="badge-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                      {selectedSession.associatedSymptoms && selectedSession.associatedSymptoms.length > 0 ? (
-                        selectedSession.associatedSymptoms.map((sym, idx) => (
-                          <span key={idx} className="clinical-badge" style={{ backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '0.15rem 0.45rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>
-                            {sym}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="clinical-badge" style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>None extracted</span>
-                      )}
-                    </div>
+                  <div className="copilot-tabs" role="tablist" aria-label="Consultation support views">
+                    <button
+                      id="clinical-tab"
+                      className={`copilot-tab ${copilotTab === 'clinical' ? 'active' : ''}`}
+                      role="tab"
+                      aria-selected={copilotTab === 'clinical'}
+                      aria-controls="clinical-panel"
+                      onClick={() => setCopilotTab('clinical')}
+                    >
+                      AI Clinical Copilot
+                    </button>
+                    <button
+                      id="patient-tab"
+                      className={`copilot-tab ${copilotTab === 'patient' ? 'active' : ''}`}
+                      role="tab"
+                      aria-selected={copilotTab === 'patient'}
+                      aria-controls="patient-panel"
+                      onClick={() => setCopilotTab('patient')}
+                    >
+                      Patient Handout
+                    </button>
                   </div>
                 </div>
 
-                {/* Side by side Translation validation check */}
-                <div className="clinical-section-block" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1.25rem', backgroundColor: '#f8fafc', padding: '1rem', borderRadius: '8px' }}>
-                  <h4 className="clinical-section-title" style={{ margin: '0 0 0.75rem 0', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
-                    Patient Input & Translation Check
-                  </h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
-                    <div>
-                      <span style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem', textTransform: 'uppercase' }}>
-                        Patient Input ({selectedSession.languageSpoken})
-                      </span>
-                      <p style={{ margin: 0, fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-body)', lineHeight: '1.5' }}>
-                        "{selectedSession.originalSymptomsText}"
-                      </p>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem', textTransform: 'uppercase' }}>
-                        Organized English Translation
-                      </span>
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-body)', lineHeight: '1.5' }}>
-                        {selectedSession.translatedSymptomsText}
-                      </p>
-                    </div>
+                {copilotError ? (
+                  <div className="copilot-status copilot-status-error" role="alert">
+                    <strong>Unable to load decision-support content</strong>
+                    <span>{copilotError}</span>
                   </div>
-                </div>
+                ) : copilotTab === 'clinical' ? (
+                  <div id="clinical-panel" role="tabpanel" aria-labelledby="clinical-tab" className="copilot-panel">
+                    {!selectedSession.clinicalSummary &&
+                     !selectedSession.treatmentDraft &&
+                     !selectedSession.smartQuestions?.length &&
+                     !selectedSession.redFlags?.length ? (
+                      <div className="copilot-status">
+                        <strong>Clinical draft not generated yet</strong>
+                        <span>Complete the patient symptom analysis to generate clinician decision-support content.</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="copilot-section-grid">
+                          {(selectedSession.clinicalSummary || selectedSession.associatedSymptoms?.length) && (
+                            <article className="copilot-section-card">
+                              <h4>Clinical Assessment</h4>
+                              {selectedSession.clinicalSummary && <p>{selectedSession.clinicalSummary}</p>}
+                              {!!selectedSession.associatedSymptoms?.length && (
+                                <div className="finding-list">
+                                  {selectedSession.associatedSymptoms.map((symptom, index) => <span key={index}>{symptom}</span>)}
+                                </div>
+                              )}
+                            </article>
+                          )}
 
-              </div>
+                          {!!selectedSession.smartQuestions?.length && (
+                            <article className="copilot-section-card">
+                              <h4>Suggested Next Steps</h4>
+                              <p className="section-helper">Follow-up questions supplied by the clinical analysis for clinician verification.</p>
+                              <div className="question-list">
+                                {selectedSession.smartQuestions.map((question, index) => {
+                                  const key = `${selectedSessionId}-${index}`;
+                                  return (
+                                    <label key={key} className={checkedQuestions[key] ? 'checked' : ''}>
+                                      <input type="checkbox" checked={!!checkedQuestions[key]} onChange={() => toggleQuestionCheck(index)} />
+                                      <span>{question}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </article>
+                          )}
 
-              {/* Generative AI Clinical Copilot Section */}
-              <div className="copilot-card" style={{ border: '2px solid var(--primary)', borderRadius: 'var(--radius-md)', overflow: 'hidden', boxShadow: 'var(--shadow-md)' }}>
-                <div className="copilot-header" style={{ display: 'flex', backgroundColor: 'var(--primary)', color: '#ffffff', padding: '0.25rem' }}>
-                  <button
-                    className={`copilot-tab-btn ${copilotTab === 'clinical' ? 'active' : ''}`}
-                    style={{
-                      flex: 1,
-                      padding: '0.65rem',
-                      border: 'none',
-                      backgroundColor: copilotTab === 'clinical' ? '#ffffff' : 'transparent',
-                      color: copilotTab === 'clinical' ? 'var(--primary)' : '#ffffff',
-                      fontWeight: 800,
-                      fontSize: '0.8rem',
-                      textTransform: 'uppercase',
-                      cursor: 'pointer',
-                      borderRadius: '4px',
-                      transition: 'all 0.2s'
-                    }}
-                    onClick={() => setCopilotTab('clinical')}
-                  >
-                    🧠 AI Clinical Copilot & Treatment Draft
-                  </button>
-                  <button
-                    className={`copilot-tab-btn ${copilotTab === 'patient' ? 'active' : ''}`}
-                    style={{
-                      flex: 1,
-                      padding: '0.65rem',
-                      border: 'none',
-                      backgroundColor: copilotTab === 'patient' ? '#ffffff' : 'transparent',
-                      color: copilotTab === 'patient' ? 'var(--primary)' : '#ffffff',
-                      fontWeight: 800,
-                      fontSize: '0.8rem',
-                      textTransform: 'uppercase',
-                      cursor: 'pointer',
-                      borderRadius: '4px',
-                      transition: 'all 0.2s'
-                    }}
-                    onClick={() => setCopilotTab('patient')}
-                  >
-                    📄 Patient Handout summary
-                  </button>
-                </div>
+                          {selectedSession.treatmentDraft && (
+                            <article className="copilot-section-card treatment-card">
+                              <h4>Treatment Draft</h4>
+                              <p>{selectedSession.treatmentDraft}</p>
+                            </article>
+                          )}
 
-                <div className="copilot-body" style={{ padding: '1.25rem', backgroundColor: '#ffffff' }}>
-                  {copilotTab === 'clinical' ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      
-                      {/* Follow-up questions */}
-                      <div>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', display: 'block', marginBottom: '0.5rem', letterSpacing: '0.5px' }}>
-                          ❓ Recommended Follow-Up Questions (Verify during intake)
-                        </span>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                          {(selectedSession.smartQuestions && selectedSession.smartQuestions.length > 0) ? (
-                            selectedSession.smartQuestions.map((q, idx) => {
-                              const key = `${selectedSessionId}-${idx}`;
-                              const isChecked = !!checkedQuestions[key];
-                              return (
-                                <label
-                                  key={idx}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'flex-start',
-                                    gap: '0.5rem',
-                                    fontSize: '0.85rem',
-                                    cursor: 'pointer',
-                                    backgroundColor: isChecked ? 'var(--primary-light)' : '#f8fafc',
-                                    padding: '0.5rem 0.75rem',
-                                    borderRadius: '6px',
-                                    border: isChecked ? '1px solid rgba(13,148,136,0.3)' : '1px solid #e2e8f0',
-                                    color: isChecked ? 'var(--primary-hover)' : 'var(--text-body)',
-                                    fontWeight: isChecked ? 600 : 500,
-                                    transition: 'all 0.2s'
-                                  }}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={() => toggleQuestionCheck(idx)}
-                                    style={{ marginTop: '0.15rem', cursor: 'pointer' }}
-                                  />
-                                  <span>{q}</span>
-                                </label>
-                              );
-                            })
-                          ) : (
-                            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>No follow-up questions generated.</p>
+                          {!!selectedSession.redFlags?.length && (
+                            <article className="copilot-section-card red-flags-card">
+                              <h4>Red Flags</h4>
+                              <ul>{selectedSession.redFlags.map((flag, index) => <li key={index}>{flag}</li>)}</ul>
+                            </article>
                           )}
                         </div>
+                        <aside className="clinical-disclaimer">
+                          <strong>Clinical disclaimer</strong>
+                          <span>AI-generated decision support only. Review all findings and drafts before making clinical decisions.</span>
+                        </aside>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div id="patient-panel" role="tabpanel" aria-labelledby="patient-tab" className="copilot-panel">
+                    {!selectedSession.patientFriendlySummary ? (
+                      <div className="copilot-status">
+                        <strong>Patient handout not generated yet</strong>
+                        <span>Complete the patient symptom analysis before sharing or printing a handout.</span>
                       </div>
-
-                      {/* Care Guidance Plan */}
-                      <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem', letterSpacing: '0.5px' }}>
-                          📋 Generative Care & Advice Draft (Non-pharmacological)
-                        </span>
-                        <div style={{ backgroundColor: 'var(--primary-light)', border: '1px solid rgba(13,148,136,0.2)', padding: '0.75rem 1rem', borderRadius: '8px', fontSize: '0.85rem', color: 'var(--text-body)', lineHeight: '1.5' }}>
-                          {selectedSession.treatmentDraft || 'Ensure rest, hydration, and seek a general practitioner review.'}
+                    ) : (
+                      <>
+                        <article className="handout-card">
+                          <div className="handout-card-header">
+                            <div>
+                              <span>Patient-facing summary</span>
+                              <h4>What we discussed and what to do next</h4>
+                            </div>
+                            <span className="language-chip">{selectedSession.languageSpoken || 'Language not specified'}</span>
+                          </div>
+                          <p>{selectedSession.patientFriendlySummary}</p>
+                        </article>
+                        <div className="handout-actions">
+                          <button className="btn" onClick={handlePrintHandout}>Print Handout</button>
+                          <button className="btn btn-primary" onClick={() => setShowQRModal(true)}>Sync to Patient Phone</button>
                         </div>
-                      </div>
-
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      
-                      {/* Simplified Patient summary */}
-                      <div>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem', letterSpacing: '0.5px' }}>
-                          🗣️ Native-Language Simplified Summary ({selectedSession.languageSpoken.split(' ')[0]})
-                        </span>
-                        <div style={{ border: '1px solid var(--border-color)', backgroundColor: '#fafbfb', padding: '0.75rem 1rem', borderRadius: '8px', fontSize: '0.9rem', fontStyle: 'italic', color: 'var(--text-main)', lineHeight: '1.6' }}>
-                          "{selectedSession.patientFriendlySummary || 'No simplified summary available.'}"
-                        </div>
-                      </div>
-
-                      {/* Print and share handlers */}
-                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                        <button
-                          className="btn"
-                          style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', fontWeight: 700, backgroundColor: '#ffffff', border: '1px solid var(--primary)', color: 'var(--primary)' }}
-                          onClick={() => {
-                            const w = window.open();
-                            if (w) {
-                              w.document.write(`
-                                <div style="font-family: sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto; border: 2px solid #0d9488; border-radius: 8px;">
-                                  <h2 style="color: #0d9488; border-bottom: 2px solid #0d9488; padding-bottom: 0.5rem;">VaaniDoc - Patient Handout</h2>
-                                  <p><strong>Patient:</strong> ${selectedSession.patientName} (Age: ${selectedSession.age || 'N/A'} | Gender: ${selectedSession.gender})</p>
-                                  <p><strong>Chief Complaint:</strong> ${selectedSession.chiefComplaint}</p>
-                                  <h3 style="color: #0f172a; margin-top: 1.5rem;">Triage Summary / डॉक्टर का परामर्श</h3>
-                                  <p style="font-size: 1.15rem; font-style: italic; background-color: #f0fdfa; padding: 1rem; border-radius: 4px; line-height: 1.6;">"${selectedSession.patientFriendlySummary}"</p>
-                                  <footer style="margin-top: 2rem; font-size: 0.75rem; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 1rem;">
-                                    This is a clinical intake receipt. Consult your physician for treatment.
-                                  </footer>
-                                </div>
-                              `);
-                              w.print();
-                              w.close();
-                            }
-                          }}
-                        >
-                          🖨️ Print Handout Card
-                        </button>
-                        <button
-                          className="btn btn-primary"
-                          style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', fontWeight: 700 }}
-                          onClick={() => setShowQRModal(true)}
-                        >
-                          📲 Sync to Patient Phone
-                        </button>
-                      </div>
-
-                    </div>
-                  )}
-                </div>
-              </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </section>
 
               {/* Privacy disclaimer */}
               <div className="privacy-disclaimer" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
@@ -860,9 +807,9 @@ ${selectedSession.treatmentDraft || 'N/A'}
             </div>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Sharing and QR Code Modal (Wow Factor) */}
+      {/* Local, transient patient handout sharing modal */}
       {showQRModal && selectedSession && (
         <div style={{
           position: 'fixed',
@@ -890,7 +837,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
             animation: 'fadeIn 0.25s'
           }}>
             <button
-              onClick={() => { setShowQRModal(false); setSmsSentText(false); }}
+              onClick={() => { setShowQRModal(false); setSummaryCopied(false); }}
               style={{
                 position: 'absolute',
                 top: '1rem',
@@ -906,14 +853,13 @@ ${selectedSession.treatmentDraft || 'N/A'}
               &times;
             </button>
             <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 800, color: 'var(--primary)' }}>
-              📲 Share Consult Summary
+              Share Patient Handout
             </h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem', fontWeight: 600 }}>
-              Scan QR code with the patient's phone to transfer their translated summary directly, or trigger a mockup SMS message.
+              Scan this QR code with the patient's phone to view the handout summary.
             </p>
 
-            {/* Self-contained mockup SVG QR Code */}
-            <div style={{
+            <div className="qr-frame" style={{
               display: 'inline-flex',
               padding: '1rem',
               backgroundColor: '#f8fafc',
@@ -921,17 +867,17 @@ ${selectedSession.treatmentDraft || 'N/A'}
               borderRadius: '12px',
               marginBottom: '1.5rem'
             }}>
-              <svg width="140" height="140" viewBox="0 0 29 29" fill="none" stroke="currentColor" strokeWidth="0.1" shapeRendering="crispEdges">
-                <path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2zm0 18h7v7H0v-7zm1 1v5h5v-5H1zm21-21h7v7h-7V0zm1 1v5h5V1h-5zm-14 1h1v1h-1v-1zm1 1h2v1h-2v-1zm-1 2h1v1h-1v-1zm4-3h1v1h-1V3zm2 0h1v2h-1V3zm-1 3h2v1h-2V6zm8-3h1v1h-1V3zm2 1h1v2h-1V4zm-2 2h2v1h-2V6zm-11 5h1v1h-1v-1zm2 1h1v2h-1v-2zm-1 2h2v1h-2v-1zm-4-3h1v1h-1v-1zm1 2h2v1h-2v-1zm6-1h1v3h-1v-3zm3 0h1v1h-1v-1zm1 1h1v2h-1v-2zm-2 2h2v1h-2v-1zm-11 6h1v1h-1v-1zm1 1h2v1h-2v-1zm-1 2h1v1h-1v-1zm5-3h1v2h-1v-2zm1 2h2v1h-2v-1zm-1-3h1v1h-1v-1zm4 1h1v2h-1v-2zm1-1h1v1h-1v-1zm-2 3h2v1h-2v-1z" fill="#0d9488"/>
-              </svg>
+              <LocalQrCode value={handoutQrPayload} />
             </div>
 
+            <p className="qr-consult-id">Consult ID: <strong>{selectedSession.sessionId || 'Not provided'}</strong></p>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <button className="btn btn-primary" onClick={handleSendSMS}>
-                {smsSentText ? '✓ Intake Summary Sent via SMS' : '💬 Send Mockup SMS Notification'}
+              <button className="btn btn-primary" onClick={handleCopyHandoutSummary}>
+                {summaryCopied ? 'Summary Copied' : 'Copy Summary'}
               </button>
-              <button className="btn" style={{ border: '1px solid var(--border-color)', backgroundColor: '#ffffff' }} onClick={() => { setShowQRModal(false); setSmsSentText(false); }}>
-                Dismiss Dialog
+              <button className="btn" style={{ border: '1px solid var(--border-color)', backgroundColor: '#ffffff' }} onClick={() => { setShowQRModal(false); setSummaryCopied(false); }}>
+                Close
               </button>
             </div>
           </div>
