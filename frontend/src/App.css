@@ -214,8 +214,9 @@
 .vitals-panel label, .consultation-notes { display: grid; gap: .38rem; margin-top: .7rem; color: #3f5e5a; font-size: .82rem; font-weight: 700; }
 .vitals-panel .form-control { min-height: 42px; width: 100%; }
 .vitals-panel textarea, .consultation-notes textarea { min-height: 110px; width: 100%; resize: vertical; }
-.consultation-notes { margin-top: 1.2rem; padding: 0; border: 0; background: transparent; }
-.consultation-actions { display: flex; justify-content: flex-end; margin-top: 1.15rem; padding-top: 1rem; border-top: 1px solid #e1ebe8; }
+.consultation-notes-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; align-items: end; margin-top: 1.2rem; }
+.consultation-notes { margin: 0; padding: 0; border: 0; background: transparent; }
+.consultation-actions { display: flex; justify-content: flex-end; padding-bottom: .05rem; }
 .consultation-actions .btn { width: clamp(220px, 24vw, 280px); min-height: 44px; }
 .reanalyze-status { color: #0f766e; font-weight: 700; }
 .updated-clinical-report { margin-top: .1rem; border-color: #c8dfda; box-shadow: 0 12px 28px rgba(25, 79, 72, .075); }
@@ -236,9 +237,13 @@
 .care-plan ul { margin: 0; padding-left: 1.05rem; color: #45615d; font-size: .82rem; line-height: 1.55; }
 .care-plan details { margin-top: .75rem; }
 .care-plan summary { cursor: pointer; color: #315752; font-size: .8rem; font-weight: 800; }
+.view-details { margin-top: .75rem; }
+.view-details summary { width: fit-content; padding: .3rem .55rem; border: 1px solid #cfe4df; border-radius: 6px; background: #edf8f5; color: #087d70; cursor: pointer; font-size: .75rem; font-weight: 800; }
+.view-details[open] summary { margin-bottom: .6rem; }
 .compact-red-flags { margin-top: 1rem; padding: .8rem 1rem; border-left: 3px solid #c64a40; border-radius: 7px; background: #fff7f6; color: #8d3029; }
 .compact-red-flags h4, .compact-red-flags p { margin: 0 0 .3rem; }
 .compact-red-flags ul { margin: .3rem 0 0; padding-left: 1.15rem; }
+.compact-red-flags.no-red-flags { border-left-width: 1px; border: 1px solid #f0d7d4; color: #715c59; }
 .more-clinical-guidance { margin-top: 1rem; padding: .85rem 1rem; border: 1px solid #dce9e6; border-radius: 9px; background: #fbfefd; }
 .more-clinical-guidance > summary { cursor: pointer; color: #234d48; font: 800 .92rem var(--font-title); }
 .guidance-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 1.4rem; margin-top: 1rem; }
@@ -250,4 +255,4 @@
 .finalize-row .btn { width: auto; min-height: 42px; }
 .finalize-row .btn-primary { min-width: 190px; }
 @media (max-width: 1180px) { .updated-report-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-primary-card:last-child { grid-column: 1 / -1; } .question-row { grid-template-columns: 2rem minmax(180px, .6fr) minmax(220px, 1fr); } }
-@media (max-width: 760px) { .consultation-status-row, .updated-report-grid, .guidance-content, .vitals-grid { grid-template-columns: 1fr; } .report-primary-card:last-child { grid-column: auto; } .question-row { grid-template-columns: 2rem minmax(0, 1fr); align-items: start; } .question-row .form-control { grid-column: 2; } .consultation-actions .btn { width: 100%; } .finalize-row { align-items: stretch; flex-direction: column; } .finalize-row .btn { width: 100%; } }
+@media (max-width: 760px) { .consultation-status-row, .updated-report-grid, .guidance-content, .vitals-grid, .consultation-notes-actions { grid-template-columns: 1fr; } .report-primary-card:last-child { grid-column: auto; } .question-row { grid-template-columns: 2rem minmax(0, 1fr); align-items: start; } .question-row .form-control { grid-column: 2; } .consultation-actions .btn { width: 100%; } .finalize-row { align-items: stretch; flex-direction: column; } .finalize-row .btn { width: 100%; } }
