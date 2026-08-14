@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { analyzeSymptoms, createConservativeFallback } from "./geminiService.js";
+import { analyzeSymptoms, calculateConsultationCompleteness, createConservativeFallback, reanalyzeConsultation } from "./geminiService.js";
 
 const vagueCases = [
   ["stomach pain", "Gastrointestinal", ["Vomiting", "Nausea", "Dehydration"]],
@@ -83,4 +83,36 @@ test("copilot guidance varies across broad complaint categories", () => {
     assert.deepEqual(report.medicationConsiderations, []);
     assert.match(report.possibleCauses[0].reasoning, /not contain enough evidence/i);
   }
+});
+
+test("stomach pain consultation incorporates answers and deterministically improves completeness", async () => {
+  const initial = createConservativeFallback("stomach pain", "English", {});
+  const session = { ...initial, analysisVersion: 1, consultationAnswers: [], vitals: {} };
+  const before = calculateConsultationCompleteness(session);
+  const questions = [
+    ["Where exactly is the pain?", "upper abdomen"], ["When did it start?", "2 days"],
+    ["How severe is the pain?", "6/10"], ["Is it worse after food?", "yes"],
+    ["Any vomiting?", "no"], ["Any fever?", "no"],
+  ].map(([question, answer]) => ({ question, answer }));
+  const updated = await reanalyzeConsultation(session, { consultationAnswers: questions, vitals: { temperature: "98.4 F", pulse: "78" } });
+  assert.equal(updated.originalSymptomsText, "stomach pain");
+  assert.equal(updated.consultationAnswers.find((item) => item.question === "Any vomiting?").answer, "no");
+  assert.equal(updated.associatedSymptoms.includes("Vomiting"), false);
+  assert.ok(updated.consultationCompleteness > before.consultationCompleteness);
+  assert.match(updated.possibleCauses[0].reasoning, /upper abdominal|after food/i);
+  assert.ok(updated.suggestedExamination.some((item) => /abdominal/i.test(item)));
+  assert.ok(updated.possibleInvestigations.every((item) => item.reason && item.priority));
+  assert.notDeepEqual(updated.redFlags, updated.warningSignsToWatchFor);
+  assert.equal(updated.analysisVersion, 2);
+});
+
+test("consultation safety fields vary for respiratory, injury, and neurological red-flag complaints", async () => {
+  const respiratory = createConservativeFallback("cough", "English", {});
+  const injury = createConservativeFallback("injured my knee", "English", {});
+  const neurological = createConservativeFallback("sudden weakness on my left side and slurred speech", "English", {});
+  assert.ok(respiratory.suggestedExamination.some((item) => /oxygen|respir/i.test(item)));
+  assert.ok(injury.suggestedExamination.some((item) => /affected area|movement/i.test(item)));
+  assert.equal(neurological.urgencyClassification, "Emergency");
+  assert.ok(neurological.redFlags.length > 0);
+  assert.ok(neurological.warningSignsToWatchFor.length > 0);
 });
