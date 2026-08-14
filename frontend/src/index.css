@@ -1307,14 +1307,9 @@ body {
 
 /* Landing page */
 .landing-page { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 1.15rem 0 2.2rem; }
-.landing-nav { display: flex; align-items: center; justify-content: space-between; padding: .45rem 0 1.2rem; }
+.landing-nav { display: flex; align-items: center; justify-content: flex-start; padding: .45rem 0 1.2rem; }
 .brand-lockup { display: inline-flex; align-items: center; gap: .65rem; border: 0; background: transparent; cursor: pointer; color: #123f3b; font: 800 1.28rem var(--font-title); letter-spacing: -.04em; }
 .brand-mark { display: grid; place-items: center; width: 2.15rem; height: 2.15rem; border-radius: .7rem; color: white; background: linear-gradient(145deg, #16a394, #0c7168); box-shadow: 0 7px 16px rgba(13,148,136,.22); font-size: .95rem; }
-.landing-nav-actions { display: flex; align-items: center; gap: .75rem; }
-.nav-link { border: 0; background: transparent; color: var(--text-muted); font: 700 .78rem var(--font-title); cursor: pointer; padding: .5rem .65rem; }
-.nav-link:hover { color: var(--primary); }
-.bandwidth-toggle { display: inline-flex; gap: .4rem; align-items: center; color: var(--text-muted); font-size: .72rem; font-weight: 700; cursor: pointer; }
-.bandwidth-toggle input { accent-color: var(--primary); }
 .landing-hero { display: grid; grid-template-columns: 1.08fr .92fr; gap: clamp(2rem, 6vw, 5rem); align-items: center; padding: clamp(3rem, 7vw, 6rem) clamp(1rem, 4vw, 4rem); border-radius: 24px; background: linear-gradient(120deg, rgba(235,250,246,.92), rgba(255,255,255,.78)); border: 1px solid rgba(14, 124, 113, .12); overflow: hidden; position: relative; }
 .landing-hero:after { content: ''; position:absolute; width: 28rem; height: 28rem; border-radius: 50%; right:-13rem; bottom:-18rem; background: radial-gradient(circle, rgba(43,191,173,.17), transparent 68%); pointer-events:none; }
 .hero-copy { position: relative; z-index: 1; }
