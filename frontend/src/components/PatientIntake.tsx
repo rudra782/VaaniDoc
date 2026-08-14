@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { runOfflineSymptomAnalysis } from '../utils/offlineEngine';
+import API_URL from '../config';
 
 const OFFLINE_DRAFTS_KEY = 'vaanidoc_session_drafts';
 
@@ -159,7 +160,7 @@ export const PatientIntake: React.FC<PatientIntakeProps> = ({ isOnline, onNewInt
   useEffect(() => {
     const startSession = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/session/start', {
+        const response = await fetch(`${API_URL}/api/session/start`, {
           method: 'POST'
         });
         if (response.ok) {
@@ -278,7 +279,7 @@ export const PatientIntake: React.FC<PatientIntakeProps> = ({ isOnline, onNewInt
     }
 
     try {
-      const response = await fetch('http://localhost:5000/api/analyze', {
+      const response = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

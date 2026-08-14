@@ -3,6 +3,7 @@ import { PatientIntake } from './components/PatientIntake';
 import { DoctorDashboard } from './components/DoctorDashboard';
 import { ValidationDashboard } from './components/ValidationDashboard';
 import { LandingPage } from './components/LandingPage';
+import API_URL from './config';
 
 const OFFLINE_DRAFTS_KEY = 'vaanidoc_session_drafts';
 
@@ -108,7 +109,7 @@ function App() {
     setSessionsLoading(true);
     setSessionsError(null);
     try {
-      const response = await fetch('http://localhost:5000/api/active-sessions');
+      const response = await fetch(`${API_URL}/api/active-sessions`);
       if (!response.ok) throw new Error(`Server returned ${response.status}`);
       const data = await response.json();
       if (!Array.isArray(data)) throw new Error('Invalid active sessions response');
@@ -132,7 +133,7 @@ function App() {
 
     for (const draft of drafts) {
       try {
-        const response = await fetch('http://localhost:5000/api/sync-offline', {
+        const response = await fetch(`${API_URL}/api/sync-offline`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ localIntake: draft })

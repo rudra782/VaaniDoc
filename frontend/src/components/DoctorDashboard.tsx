@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
+import API_URL from '../config';
 
 interface IntakeSession {
   sessionId: string;
@@ -83,7 +84,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
 
   // Connect to Socket.io for live updates
   useEffect(() => {
-    const socket: Socket = io('http://localhost:5000');
+    const socket: Socket = io(API_URL);
 
     socket.on('connect', () => {
       setIsConnected(true);
@@ -149,7 +150,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
 
   const handleDismissPatient = async (sessionId: string) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/session/${sessionId}/end`, {
+      const response = await fetch(`${API_URL}/api/session/${sessionId}/end`, {
         method: 'POST'
       });
 
