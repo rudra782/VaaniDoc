@@ -1,29 +1,54 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { analyzeSymptoms } from "./geminiService.js";
+import { analyzeSymptoms, createConservativeFallback } from "./geminiService.js";
 
-const cases = [
-  ["cardiac", "I have severe chest pressure and pain going to my left arm.", "Cardiovascular", /arm|chest/i],
-  ["respiratory", "I have cough, fever and shortness of breath for 3 days.", "Respiratory", /breath|cough/i],
-  ["gastrointestinal", "I have stomach pain and vomited 4 times today.", "Gastrointestinal", /vomit|fluid|hydrat/i],
-  ["dermatology", "I have itchy red rash on my arms for two days.", "Dermatological", /rash|skin|irritant/i],
-  ["musculoskeletal", "I hurt my knee while playing football.", "Musculoskeletal", /knee|injury|weight/i],
+const vagueCases = [
+  ["stomach pain", "Gastrointestinal", ["Vomiting", "Nausea", "Dehydration"]],
+  ["headache", "Neurological", ["Weakness", "Slurred speech"]],
+  ["my leg hurts", "Musculoskeletal", ["Swelling"]],
+  ["itching", "Dermatological", ["Rash", "Redness"]],
+  ["feeling dizzy", "Neurological", ["Weakness"]],
+  ["pain while urinating", "Urinary", ["Fever", "Blood"]],
+  ["my eye is red", "Ophthalmological", ["Discharge", "Vision loss"]],
+  ["ear pain", "ENT", ["Fever", "Discharge"]],
+  ["back pain", "Musculoskeletal", ["Weakness"]],
+  ["cough", "Respiratory", ["Fever", "Shortness of breath"]],
 ];
 
-test("offline analysis produces patient-specific Copilot content", async () => {
-  const results = [];
-  for (const [name, narration, category, expectedText] of cases) {
-    const analysis = await analyzeSymptoms(narration, "English", {});
-    assert.ok(analysis.symptomCategories.includes(category), `${name} category`);
-    assert.equal(analysis.smartQuestions.length, 3, `${name} questions`);
-    assert.match(
-      `${analysis.clinicalSummary} ${analysis.smartQuestions.join(" ")} ${analysis.treatmentDraft}`,
-      expectedText,
-      `${name} content`,
-    );
-    assert.ok(Array.isArray(analysis.redFlags), `${name} red flags`);
-    results.push(analysis.clinicalSummary);
+test("vague arbitrary inputs remain narration-grounded", () => {
+  for (const [narration, category, forbidden] of vagueCases) {
+    const result = createConservativeFallback(narration, "English", {});
+    assert.deepEqual(result.symptomCategories, [category], narration);
+    assert.notEqual(result.urgencyClassification, "Emergency", narration);
+    assert.deepEqual(result.redFlags, [], narration);
+    const asserted = JSON.stringify(result.associatedSymptoms);
+    for (const symptom of forbidden) assert.doesNotMatch(asserted, new RegExp(symptom, "i"), `${narration} must not inject ${symptom}`);
+    assert.equal(result.duration, "Not specified");
+    assert.equal(result.severity, "Not specified");
   }
-  assert.equal(new Set(results).size, cases.length, "every assessment is distinct");
+});
+
+test("explicit details are preserved and evidence escalates urgency", () => {
+  const cases = [
+    ["severe difficulty breathing", /breathing/i],
+    ["sudden weakness on my left side and slurred speech", /weakness.*speech/i],
+    ["vomited six times and cannot keep water down", /vomit/i],
+  ];
+  for (const [narration, evidence] of cases) {
+    const result = createConservativeFallback(narration, "English", {});
+    assert.equal(result.urgencyClassification, "Emergency", narration);
+    assert.ok(result.redFlags.length > 0, narration);
+    assert.match(`${result.clinicalSummary} ${result.redFlags.join(" ")}`, evidence);
+  }
+});
+
+test("analysis uses the conservative fallback when no provider is configured", async () => {
+  const first = await analyzeSymptoms("stomach pain", "English", {});
+  const second = await analyzeSymptoms("cough", "English", {});
+  assert.equal(first.analysisProvider, "generic-fallback");
+  assert.equal(first.associatedSymptoms.includes("Vomiting"), false);
+  assert.equal(second.associatedSymptoms.includes("Fever"), false);
+  assert.notEqual(first.clinicalSummary, second.clinicalSummary);
+  assert.notEqual(first.treatmentDraft + first.smartQuestions.join(), second.treatmentDraft + second.smartQuestions.join());
 });
