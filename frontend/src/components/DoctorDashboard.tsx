@@ -113,7 +113,6 @@ interface DoctorDashboardProps {
 
 export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSessions, onSessionCleared, lowBandwidthMode, sessionsLoading, sessionsError, onRetrySessions }) => {
   const [sessions, setSessions] = useState<IntakeSession[]>(() => initialSessions.map(normalizeSession));
-  const [initialAssessments, setInitialAssessments] = useState<Record<string, IntakeSession>>(() => Object.fromEntries(initialSessions.map(session => [session.sessionId, normalizeSession(session)])));
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [newSessionNotification, setNewSessionNotification] = useState<string | null>(null);
@@ -137,11 +136,6 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
   useEffect(() => {
     const normalized = initialSessions.map(normalizeSession);
     setSessions(normalized);
-    setInitialAssessments(previous => {
-      const next = { ...previous };
-      normalized.forEach(session => { if (!next[session.sessionId] && (session.analysisVersion || 1) <= 1) next[session.sessionId] = session; });
-      return next;
-    });
     if (initialSessions.length > 0 && !selectedSessionId) {
       setSelectedSessionId(initialSessions[0].sessionId);
     }
@@ -167,11 +161,6 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ initialSession
         return;
       }
       const sorted = sortSessionsByUrgency(updatedSessions.map(normalizeSession));
-      setInitialAssessments(previous => {
-        const next = { ...previous };
-        sorted.forEach(session => { if (!next[session.sessionId] && (session.analysisVersion || 1) <= 1) next[session.sessionId] = session; });
-        return next;
-      });
       setSessions(sorted);
       setCopilotError(null);
       
@@ -289,7 +278,6 @@ ${selectedSession.treatmentDraft || 'N/A'}
   };
 
   const selectedSession = sessions.find(s => s.sessionId === selectedSessionId);
-  const initialAssessment = selectedSession ? (initialAssessments[selectedSession.sessionId] || selectedSession) : undefined;
   const savedDraft = selectedSession ? consultationDrafts[selectedSession.sessionId] : undefined;
   const draftAnswer = (question: string) => savedDraft?.answers[question] ?? selectedSession?.consultationAnswers?.find(item => item.question === question)?.answer ?? '';
   const updateDraft = (patch: Partial<NonNullable<typeof savedDraft>>) => {
@@ -300,7 +288,6 @@ ${selectedSession.treatmentDraft || 'N/A'}
   const handleReanalyze = async () => {
     if (!selectedSession || isReanalyzing) return;
     const draft = savedDraft || { answers: Object.fromEntries((selectedSession.consultationAnswers || []).map(item => [item.question, item.answer])), clinicianNotes: selectedSession.clinicianNotes || '', vitals: selectedSession.vitals || {}, examinationNotes: selectedSession.examinationNotes || '' };
-    setInitialAssessments(previous => previous[selectedSession.sessionId] ? previous : { ...previous, [selectedSession.sessionId]: selectedSession });
     setIsReanalyzing(true); setConsultationError(null);
     try {
       const response = await fetch(`${API_URL}/api/session/${selectedSession.sessionId}/reanalyze`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consultationAnswers: Object.entries(draft.answers).map(([question, answer]) => ({ question, answer })), clinicianNotes: draft.clinicianNotes, vitals: draft.vitals, examinationNotes: draft.examinationNotes }) });
@@ -580,8 +567,8 @@ ${selectedSession.treatmentDraft || 'N/A'}
               <section className="copilot-workspace" aria-labelledby="copilot-workspace-title">
                 <div className="copilot-workspace-heading">
                   <div>
-                    <p className="copilot-kicker">Stage 2</p>
-                    <h3 id="copilot-workspace-title">Guided Consultation</h3>
+                    <p className="copilot-kicker">Consultation workspace</p>
+                    <h3 id="copilot-workspace-title">Clinical Copilot</h3>
                   </div>
                   <div className="copilot-tabs" role="tablist" aria-label="Consultation support views">
                     <button
@@ -614,25 +601,14 @@ ${selectedSession.treatmentDraft || 'N/A'}
                   </div>
                 ) : copilotTab === 'clinical' ? (
                   <div id="clinical-panel" role="tabpanel" aria-labelledby="clinical-tab" className="copilot-panel clinical-workflow">
-                    {initialAssessment && (
-                      <section className="initial-assessment" aria-labelledby="initial-assessment-title">
-                        <div className="workflow-section-heading"><span>Step 2</span><div><h3 id="initial-assessment-title">Initial Clinical Assessment</h3><p>Based only on the patient’s original intake.</p></div></div>
-                        <div className="initial-assessment-grid">
-                          <div><h4>Clinical Summary</h4><p>{initialAssessment.clinicalSummary || 'Initial assessment not available.'}</p></div>
-                          <div><h4>Possible Causes</h4>{initialAssessment.possibleCauses?.length ? <ul>{initialAssessment.possibleCauses.map((cause, index) => <li key={index}><strong>{cause.name}</strong><span>{cause.reasoning}</span></li>)}</ul> : <p>No differential considerations available.</p>}</div>
-                        </div>
-                        <div className="initial-assessment-meta"><span>Urgency <strong className={getUrgencyDetail(initialAssessment.urgencyClassification).class}>{getUrgencyDetail(initialAssessment.urgencyClassification).label}</strong></span><span>Suggested Specialist <strong>{initialAssessment.suggestedSpecialist}</strong></span></div>
-                        {!!initialAssessment.redFlags?.length && <div className="compact-red-flags"><strong>Current Red Flags</strong><ul>{initialAssessment.redFlags.map((flag, index) => <li key={index}>{flag}</li>)}</ul></div>}
-                      </section>
-                    )}
-
                     <section className="consultation-guide" aria-labelledby="consultation-guide-title">
-                      <div className="workflow-section-heading"><span>Step 3</span><div><h3 id="consultation-guide-title">Guided Consultation</h3><p>Record patient answers and clinician-observed findings before updating the assessment.</p></div></div>
-                      <div className="consultation-progress"><strong>Information Completeness: {selectedSession.consultationCompleteness ?? 0}%</strong></div>
-                      <div className="completeness-track" aria-label={`Information completeness ${selectedSession.consultationCompleteness ?? 0}%`}><span style={{ width: `${selectedSession.consultationCompleteness ?? 0}%` }} /></div>
-                      <div className="information-needed"><strong>Information needed</strong>{selectedSession.missingInformation?.length ? <div className="missing-chip-list">{selectedSession.missingInformation.slice(0, 5).map((item, index) => <span key={index}>{item}</span>)}{selectedSession.missingInformation.length > 5 && <details><summary>+ {selectedSession.missingInformation.length - 5} more</summary><div>{selectedSession.missingInformation.slice(5).map((item, index) => <span key={index}>{item}</span>)}</div></details>}</div> : <p>No additional information item identified by the current analysis.</p>}</div>
-                      {!!selectedSession.smartQuestions?.length && <div className="guided-questions"><h4>AI Suggested Questions</h4>{selectedSession.smartQuestions.map((question, index) => <label key={index}><span><b>{index + 1}.</b> {question}</span><input className="form-control" value={draftAnswer(question)} onChange={event => updateDraft({ answers: { ...(savedDraft?.answers || Object.fromEntries((selectedSession.consultationAnswers || []).map(item => [item.question, item.answer]))), [question]: event.target.value } })} placeholder="Record the patient’s answer" /></label>)}</div>}
-                      <details className="vitals-panel"><summary>+ Vitals &amp; Examination</summary><div className="vitals-grid">{[['temperature','Temperature'],['bpSystolic','BP systolic'],['bpDiastolic','BP diastolic'],['pulse','Pulse'],['spo2','SpO2'],['respiratoryRate','Respiratory rate'],['painScore','Pain score (0–10)']].map(([key,label]) => <label key={key}><span>{label}</span><input className="form-control" value={savedDraft?.vitals[key] ?? selectedSession.vitals?.[key] ?? ''} onChange={event => updateDraft({ vitals: { ...(savedDraft?.vitals || selectedSession.vitals || {}), [key]: event.target.value } })} /></label>)}</div><label><span>Focused Examination Notes</span><textarea className="form-control" value={savedDraft?.examinationNotes ?? selectedSession.examinationNotes ?? ''} onChange={event => updateDraft({ examinationNotes: event.target.value })} placeholder="Record observed examination findings only" /></label></details>
+                      <div className="workflow-section-heading"><span>Stage 2</span><div><h3 id="consultation-guide-title">Guided Consultation</h3><p>Collect the missing clinical details before updating the assessment.</p></div></div>
+                      <div className="consultation-status-row">
+                        <div className="completeness-status"><span>Information Completeness</span><strong>{selectedSession.consultationCompleteness ?? 0}%</strong><div className="completeness-track" aria-label={`Information completeness ${selectedSession.consultationCompleteness ?? 0}%`}><i style={{ width: `${selectedSession.consultationCompleteness ?? 0}%` }} /></div></div>
+                        <div className="information-needed"><strong>Information Needed</strong>{selectedSession.missingInformation?.length ? <div className="missing-chip-list">{selectedSession.missingInformation.slice(0, 5).map((item, index) => <span key={index}>{item}</span>)}{selectedSession.missingInformation.length > 5 && <details><summary>+ {selectedSession.missingInformation.length - 5} more</summary><div>{selectedSession.missingInformation.slice(5).map((item, index) => <span key={index}>{item}</span>)}</div></details>}</div> : <p>No additional information identified.</p>}</div>
+                      </div>
+                      {!!selectedSession.smartQuestions?.length && <div className="guided-questions"><h4>AI Suggested Questions</h4>{selectedSession.smartQuestions.map((question, index) => <label key={index} className="question-row"><b>{index + 1}</b><span>{question}</span><input className="form-control" value={draftAnswer(question)} onChange={event => updateDraft({ answers: { ...(savedDraft?.answers || Object.fromEntries((selectedSession.consultationAnswers || []).map(item => [item.question, item.answer]))), [question]: event.target.value } })} placeholder="Type or record the patient’s answer" /></label>)}</div>}
+                      <details className="vitals-panel"><summary>Vitals &amp; Examination <span>Optional</span></summary><div className="vitals-grid">{[['temperature','Temperature'],['bpSystolic','BP systolic'],['bpDiastolic','BP diastolic'],['pulse','Pulse'],['spo2','SpO2'],['respiratoryRate','Respiratory rate'],['painScore','Pain score (0–10)']].map(([key,label]) => <label key={key}><span>{label}</span><input className="form-control" value={savedDraft?.vitals[key] ?? selectedSession.vitals?.[key] ?? ''} onChange={event => updateDraft({ vitals: { ...(savedDraft?.vitals || selectedSession.vitals || {}), [key]: event.target.value } })} /></label>)}</div><label><span>Focused Examination Notes</span><textarea className="form-control" value={savedDraft?.examinationNotes ?? selectedSession.examinationNotes ?? ''} onChange={event => updateDraft({ examinationNotes: event.target.value })} placeholder="Record observed examination findings only" /></label></details>
                       <label className="consultation-notes"><span>Additional Consultation Notes</span><textarea className="form-control" value={savedDraft?.clinicianNotes ?? selectedSession.clinicianNotes ?? ''} onChange={event => updateDraft({ clinicianNotes: event.target.value })} placeholder="Add patient-reported context not covered above" /></label>
                       {consultationError && <div className="copilot-status copilot-status-error" role="alert">{consultationError}</div>}
                       {isReanalyzing && <p className="reanalyze-status" role="status">Updating clinical assessment...</p>}
@@ -641,13 +617,13 @@ ${selectedSession.treatmentDraft || 'N/A'}
 
                     {(selectedSession.analysisVersion || 1) > 1 && (
                       <section className="updated-clinical-report" aria-labelledby="updated-report-title">
-                        <div className="workflow-section-heading"><span>Step 4</span><div><h3 id="updated-report-title">Updated Clinical Report</h3><p>Updated using clinician-provided consultation information.</p></div></div>
+                        <div className="workflow-section-heading report-heading"><span>Stage 3</span><div><h3 id="updated-report-title">Updated Clinical Report</h3><p>Refined assessment based on the information collected during consultation.</p></div></div>
                         <div className="updated-report-grid">
-                          <article><h4>Refined Clinical Assessment</h4><p>{selectedSession.clinicalSummary}</p></article>
-                          <article><h4>Possible Causes</h4><p className="section-helper">Differential considerations, not confirmed diagnoses.</p><div className="cause-list">{selectedSession.possibleCauses?.map((cause, index) => <div className="cause-item" key={index}><strong>{cause.name}</strong><p>{cause.reasoning}</p></div>)}</div></article>
-                          <article className="care-plan"><h4>Care Plan</h4>{!!selectedSession.recommendedNextSteps?.length && <div><h5>Recommended Actions</h5><ul>{selectedSession.recommendedNextSteps.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}{selectedSession.treatmentDraft && <div><h5>Treatment / Management Considerations</h5><p>{selectedSession.treatmentDraft}</p></div>}</article>
-                          {!!selectedSession.redFlags?.length && <article className="compact-red-flags current-report-red-flags"><h4>Current Red Flags</h4><p>Reported or detected in the current consultation.</p><ul>{selectedSession.redFlags.map((flag, index) => <li key={index}>{flag}</li>)}</ul></article>}
+                          <article className="report-primary-card"><h4>Refined Clinical Assessment</h4><p>{selectedSession.clinicalSummary}</p></article>
+                          <article className="report-primary-card"><h4>Possible Causes</h4><p className="section-helper">Differential considerations, not confirmed diagnoses.</p><div className="compact-causes">{selectedSession.possibleCauses?.slice(0, 3).map((cause, index) => <details key={index}><summary><strong>{cause.name}</strong><span>{cause.confidence} possibility</span></summary><p>{cause.reasoning}</p></details>)}</div></article>
+                          <article className="report-primary-card care-plan"><h4>Care Plan</h4>{!!selectedSession.recommendedNextSteps?.length && <div><h5>Recommended Actions</h5><ul>{selectedSession.recommendedNextSteps.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}{selectedSession.treatmentDraft && <details><summary>Management Considerations</summary><p>{selectedSession.treatmentDraft}</p></details>}</article>
                         </div>
+                        {!!selectedSession.redFlags?.length && <div className="compact-red-flags current-report-red-flags"><h4>Current Red Flags</h4><p>Reported or detected in the current consultation.</p><ul>{selectedSession.redFlags.map((flag, index) => <li key={index}>{flag}</li>)}</ul></div>}
                         <details className="more-clinical-guidance"><summary>More Clinical Guidance</summary><div className="guidance-content">
                           {!!selectedSession.suggestedExamination?.length && <section><h5>Suggested Examination / Monitoring</h5><ul>{selectedSession.suggestedExamination.map((item, index) => <li key={index}>{item}</li>)}</ul></section>}
                           <section><h5>Possible Investigations</h5>{selectedSession.possibleInvestigations?.length ? <ul>{selectedSession.possibleInvestigations.map((item, index) => <li key={index}><strong>{item.name}</strong> — {item.reason} ({item.priority})</li>)}</ul> : <p>More history or examination is needed before deciding whether tests are justified.</p>}</section>
@@ -658,7 +634,7 @@ ${selectedSession.treatmentDraft || 'N/A'}
                           <section><h5>Suggested Specialist</h5><p>{selectedSession.suggestedSpecialist}</p></section>
                           {!!selectedSession.warningSignsToWatchFor?.length && <section className="warning-guidance"><h5>Warning Signs to Watch For</h5><p>Not currently reported; these do not determine current urgency.</p><ul>{selectedSession.warningSignsToWatchFor.map((item, index) => <li key={index}>{item}</li>)}</ul></section>}
                         </div></details>
-                        <div className="finalize-row"><button className="btn" disabled={isReanalyzing || selectedSession.isConsultationFinalized} onClick={handleFinalize}>{selectedSession.isConsultationFinalized ? 'Consultation Finalized' : 'Finalize Consultation'}</button></div>
+                        <div className="finalize-row"><button className="btn" onClick={() => setCopilotTab('patient')}>Patient Handout</button><button className="btn" onClick={handlePrint}>Print Chart</button><button className="btn btn-primary" disabled={isReanalyzing || selectedSession.isConsultationFinalized} onClick={handleFinalize}>{selectedSession.isConsultationFinalized ? 'Consultation Finalized' : 'Finalize Consultation'}</button></div>
                       </section>
                     )}
                     <aside className="clinical-disclaimer"><strong>Clinical disclaimer</strong><span>AI-generated decision support only. Review all findings and drafts before making clinical decisions.</span></aside>
