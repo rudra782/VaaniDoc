@@ -37,7 +37,10 @@ const io = new Server(server, {
 // WebSocket Connection Handler
 io.on("connection", (socket) => {
   console.log(`Client connected: ${socket.id}`);
-  socket.emit("sessions-update", Array.from(activeSessions.values()));
+  // Keep the websocket contract identical to GET /api/active-sessions. Some
+  // sessions (notably restored/offline sessions) are stored in the portable
+  // snake_case shape and need mapping before the dashboard can consume them.
+  socket.emit("sessions-update", Array.from(activeSessions.values()).map(mapIntakeSession));
 
   socket.on("disconnect", () => {
     console.log(`Client disconnected: ${socket.id}`);
@@ -92,17 +95,11 @@ function mapIntakeSession(session) {
 
   const confidence = session.confidence || 0.94;
 
-  const smartQuestions = session.smartQuestions || session.smart_questions || [
-    "When did this start?",
-    "Have you had similar symptoms in the past?",
-    "Does anything make it better or worse?"
-  ];
-  const treatmentDraft = session.treatmentDraft || session.treatment_draft || "Ensure adequate rest and hydration. Seek medical advice if symptoms persist.";
-  const patientFriendlySummary = session.patientFriendlySummary || session.patient_friendly_summary || (
-    language.startsWith("Hindi") 
-      ? "कृपया आराम करें और पर्याप्त पानी पीएं। लक्षण बने रहने पर डॉक्टर से मिलें।" 
-      : "Please rest and drink plenty of fluids. Consult a doctor if symptoms worsen."
-  );
+  // These are generated values, so mapping must preserve absence rather than
+  // manufacturing content that looks like an AI result.
+  const smartQuestions = session.smartQuestions ?? session.smart_questions ?? session.data?.smart_questions;
+  const treatmentDraft = session.treatmentDraft ?? session.treatment_draft ?? session.data?.treatment_draft;
+  const patientFriendlySummary = session.patientFriendlySummary ?? session.patient_friendly_summary ?? session.data?.patient_friendly_summary;
 
   const data = {
     language,
@@ -169,7 +166,7 @@ app.post("/api/session/start", (req, res) => {
 app.get("/api/session/:id", (req, res) => {
   const { id } = req.params;
   if (activeSessions.has(id)) {
-    return res.status(200).json({ success: true, data: activeSessions.get(id) });
+    return res.status(200).json({ success: true, data: mapIntakeSession(activeSessions.get(id)) });
   }
   return res.status(404).json({ success: false, error: "Session not found." });
 });
@@ -182,7 +179,7 @@ app.post("/api/session/:id/end", (req, res) => {
     console.log(`Clinical session ended & deleted: ${id}`);
     
     // Broadcast updated queue
-    io.emit("sessions-update", Array.from(activeSessions.values()));
+    io.emit("sessions-update", Array.from(activeSessions.values()).map(mapIntakeSession));
     return res.status(200).json({ success: true, message: "Temporary patient data deleted." });
   }
   return res.status(404).json({ success: false, error: "Session not found or already deleted." });
@@ -239,7 +236,7 @@ app.post("/api/analyze", async (req, res) => {
     if (persistSession) {
       activeSessions.set(sId, mappedSession);
       // Only genuine patient intakes are visible to the attending clinician.
-      io.emit("sessions-update", Array.from(activeSessions.values()));
+    io.emit("sessions-update", Array.from(activeSessions.values()).map(mapIntakeSession));
       io.emit("new-session", mappedSession);
     }
 
@@ -289,7 +286,7 @@ app.post("/api/sync-offline", async (req, res) => {
     const mappedSession = mapIntakeSession(rawSession);
     activeSessions.set(sId, mappedSession);
     
-    io.emit("sessions-update", Array.from(activeSessions.values()));
+      io.emit("sessions-update", Array.from(activeSessions.values()).map(mapIntakeSession));
     io.emit("new-session", mappedSession);
 
     return res.status(200).json(mappedSession);
@@ -317,7 +314,7 @@ app.post("/api/clear-session", (req, res) => {
     activeSessions.delete(sessionId);
     console.log(`Session cleared: ${sessionId}`);
     
-    io.emit("sessions-update", Array.from(activeSessions.values()));
+    io.emit("sessions-update", Array.from(activeSessions.values()).map(mapIntakeSession));
     return res.status(200).json({ success: true, message: "Session cleared successfully." });
   }
 

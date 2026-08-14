@@ -24,6 +24,18 @@ interface IntakeSession {
   urgencyClassification: string;
   urgencyReason: string;
   suggestedSpecialist: string;
+  smartQuestions?: string[];
+  treatmentDraft?: string;
+  patientFriendlySummary?: string;
+  redFlags?: string[];
+  confidence?: number;
+  data?: {
+    smart_questions?: string[];
+    treatment_draft?: string;
+    patient_friendly_summary?: string;
+    red_flags?: string[];
+    confidence?: number;
+  };
   isOfflineGenerated?: boolean;
 }
 
@@ -34,6 +46,8 @@ function App() {
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [activeSessions, setActiveSessions] = useState<IntakeSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [offlineDraftsCount, setOfflineDraftsCount] = useState(0);
 
@@ -91,14 +105,19 @@ function App() {
   };
 
   const fetchActiveSessions = async () => {
+    setSessionsLoading(true);
+    setSessionsError(null);
     try {
       const response = await fetch('http://localhost:5000/api/active-sessions');
-      if (response.ok) {
-        const data = await response.json();
-        setActiveSessions(data);
-      }
+      if (!response.ok) throw new Error(`Server returned ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data)) throw new Error('Invalid active sessions response');
+      setActiveSessions(data);
     } catch (err) {
       console.warn('Could not fetch active sessions. Server may be offline or unreachable.', err);
+      setSessionsError('Unable to load the active intake queue. Check the clinical server connection and try again.');
+    } finally {
+      setSessionsLoading(false);
     }
   };
 
@@ -400,7 +419,14 @@ function App() {
         {currentPath === '/patient' ? (
           <PatientIntake isOnline={isOnline} onNewIntakeCreated={handleNewIntakeCreated} lowBandwidthMode={lowBandwidthMode} />
         ) : (
-          <DoctorDashboard initialSessions={activeSessions} onSessionCleared={handleSessionCleared} lowBandwidthMode={lowBandwidthMode} />
+          <DoctorDashboard
+            initialSessions={activeSessions}
+            onSessionCleared={handleSessionCleared}
+            lowBandwidthMode={lowBandwidthMode}
+            sessionsLoading={sessionsLoading}
+            sessionsError={sessionsError}
+            onRetrySessions={fetchActiveSessions}
+          />
         )}
       </main>
 
